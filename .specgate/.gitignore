@@ -1,0 +1,14 @@
+# SpecGate — configs locais (não versionar)
+# Specs, docs e tasks em .specgate/specs|docs|tasks podem ir para o GitHub.
+agents/
+skills/
+instructions/
+config/
+graph/
+memory/
+telemetry/
+secrets/
+runs/
+env-proxy/
+infra-compose/
+notes/ingest/

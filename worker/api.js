@@ -1,4 +1,4 @@
-import { PHASE_ORDER, createWorld } from '../public/world.js';
+import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
 import { globalChat } from './chat.js';
 import { ApiError, dbFor, json } from './http.js';
 import { globalLeaderboard } from './leaderboard.js';

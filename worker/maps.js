@@ -1,4 +1,4 @@
-import { validateCustomMap } from '../public/world.js';
+import { validateCustomMap } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 import { TTL } from './rooms.js';
 

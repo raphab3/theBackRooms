@@ -1,5 +1,5 @@
 // Perfil do explorador, missões, progresso salvo e painel de missões.
-import { PHASE_ORDER, phaseFuseCount } from '../world.js';
+import { PHASE_ORDER, phaseFuseCount } from '@backrooms/shared/world.js';
 import { menuMusic, playMusic, syncMenuMusic } from './audio.js';
 import { builder } from './builder.js';
 import { closeChat, syncGlobalChat } from './chat.js';

@@ -1,5 +1,5 @@
 // Núcleo do jogo: estado da fase, física, monstro, loop e entrada de teclado/mouse.
-import { PHASE_ORDER, createWorld } from '../world.js';
+import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
 import { gameMusic, initAudio, playMusic, syncGameMusic, syncMenuMusic, tone } from './audio.js';
 import {
   builder,

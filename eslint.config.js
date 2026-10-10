@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
-  { ignores: ['node_modules/', 'data/', '.wrangler/'] },
+  { ignores: ['**/dist/', 'node_modules/', 'data/', '.wrangler/'] },
   js.configs.recommended,
   {
     rules: {
@@ -14,7 +14,7 @@ export default [
     },
   },
   {
-    files: ['public/**/*.js'],
+    files: ['apps/**/*.js'],
     languageOptions: { globals: globals.browser },
   },
   {

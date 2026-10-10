@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { api } from '../worker/index.js';
 const root = fileURLToPath(new URL('../', import.meta.url)),
-  publicDir = resolve(root, 'public');
+  publicDir = resolve(root, 'apps/game/dist');
 await mkdir(resolve(root, 'data'), { recursive: true });
 const sqlite = new DatabaseSync(resolve(root, 'data/game.sqlite'));
 sqlite.exec('CREATE TABLE IF NOT EXISTS local_migrations(name TEXT PRIMARY KEY)');

@@ -2,3 +2,20 @@ node_modules/
 data/
 .wrangler/
 .dev.vars
+apps/game/dist/
+
+# SpecGate — agents, skills, instruções e configs locais
+# (specs/, docs/ e tasks/ em .specgate/ são versionáveis)
+.specgate/agents/
+.specgate/skills/
+.specgate/instructions/
+.specgate/config/
+.specgate/graph/
+.specgate/memory/
+.specgate/telemetry/
+.specgate/secrets/
+.specgate/runs/
+.specgate/env-proxy/
+.specgate/infra-compose/
+.specgate/notes/ingest/
+.env.specgate.local

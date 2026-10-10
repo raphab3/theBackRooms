@@ -1,0 +1,9 @@
+{
+  "name": "@backrooms/shared",
+  "version": "60.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./world.js": "./world.js"
+  }
+}

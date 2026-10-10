@@ -32,7 +32,7 @@ Nome especial: `lucca416453416453admin`. Ele libera mapas e moedas infinitas. O 
 
 ## Código-fonte
 
-`public/`: jogo, músicas e interface (HTML/CSS/JS puro, sem build). O cliente fica em `public/js/` em módulos ES: `main.js` (entrada e ordem de inicialização), `state.js` (estado compartilhado `game`), `engine.js` (núcleo e loop), `render.js` (raycasting), `net.js` (multiplayer), `builder.js` (construtor) e um módulo por recurso (chat, missões, ranking, gamepad, toque, áudio…). `world.js` gera os labirintos e é compartilhado com o servidor.
+`apps/game/`: jogo (Vite), músicas e interface (HTML/CSS/JS puro, sem build). O cliente fica em `apps/game/js/` em módulos ES: `main.js` (entrada e ordem de inicialização), `state.js` (estado compartilhado `game`), `engine.js` (núcleo e loop), `render.js` (raycasting), `net.js` (multiplayer), `builder.js` (construtor) e um módulo por recurso (chat, missões, ranking, gamepad, toque, áudio…). `packages/shared/world.js` gera os labirintos e é compartilhado com o servidor.
 `worker/`: API em módulos — `index.js` (entrada), `api.js` (rotas), `rooms.js` (salas e partida), `players.js`, `chat.js`, `profiles.js`, `leaderboard.js`, `maps.js` (construtor) e `http.js` (respostas e erros).
 `drizzle/`: migrações do banco (SQLite/D1).
 `scripts/local-server.mjs`: servidor portátil usando SQLite do Node.js.

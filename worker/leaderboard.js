@@ -1,4 +1,4 @@
-import { PHASE_ORDER } from '../public/world.js';
+import { PHASE_ORDER } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 import { adminName, authorize, nameOf } from './players.js';
 import { validatedLevel } from './rooms.js';

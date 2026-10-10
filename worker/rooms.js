@@ -1,4 +1,4 @@
-import { PHASE_ORDER, createWorld, findRoute } from '../public/world.js';
+import { PHASE_ORDER, createWorld, findRoute } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 
 const LEVELS = PHASE_ORDER;

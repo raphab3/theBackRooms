@@ -1,5 +1,5 @@
 // Ranking global por fase e campanha.
-import { PHASE_ORDER } from '../world.js';
+import { PHASE_ORDER } from '@backrooms/shared/world.js';
 import { builder } from './builder.js';
 import { closeChat } from './chat.js';
 import { $ } from './dom.js';
