@@ -32,13 +32,30 @@ Nome especial: `lucca416453416453admin`. Ele libera mapas e moedas infinitas. O 
 
 ## Código-fonte
 
-`public/`: jogo, músicas e interface.
-`worker/`: API de salas, missões e chat.
-`drizzle/`: estrutura do banco de dados.
+`public/`: jogo, músicas e interface (HTML/CSS/JS puro, sem build).
+`worker/`: API em módulos — `index.js` (entrada), `api.js` (rotas), `rooms.js` (salas e partida), `players.js`, `chat.js`, `profiles.js`, `leaderboard.js`, `maps.js` (construtor) e `http.js` (respostas e erros).
+`drizzle/`: migrações do banco (SQLite/D1).
 `scripts/local-server.mjs`: servidor portátil usando SQLite do Node.js.
 `tests/`: testes do jogo.
 
-Gerenciador de pacotes: pnpm (não há dependências, mas `pnpm install` funciona). Para iniciar: `pnpm start`. Para testar: `pnpm test`. O banco é criado automaticamente, incluindo as tabelas do construtor.
+## Desenvolvimento
+
+Gerenciador de pacotes: pnpm. Rode `pnpm install` uma vez (só ferramentas de desenvolvimento; o jogo não tem dependências).
+
+| Comando                     | O que faz                                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm start`                | Servidor local com Node (`data/game.sqlite`), porta 3000                                                                  |
+| `pnpm dev`                  | Mesmo jogo no runtime da Cloudflare (Wrangler + D1 local), porta 8787. Rode `pnpm db:migrate:local` antes da primeira vez |
+| `pnpm test`                 | Testes                                                                                                                    |
+| `pnpm lint` / `pnpm format` | ESLint / Prettier                                                                                                         |
+| `pnpm check`                | Formatação + lint + testes                                                                                                |
+| `pnpm release`              | Aplica migrações no D1 remoto e publica o Worker                                                                          |
+
+### Publicar na Cloudflare
+
+1. `pnpm exec wrangler login`
+2. `pnpm exec wrangler d1 create backrooms` e copie o `database_id` para `wrangler.jsonc`.
+3. `pnpm release`
 
 Versão do código publicado: ab1fc3a7405e813d39199afb1bb6ba87a8616cda.
 Referência técnica do iniciador: https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html

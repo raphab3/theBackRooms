@@ -1,5 +1,5 @@
 // Local translations: no redirects, network requests or changes to player data.
-const rows=`
+const rows = `
 ⚒ MODO CONSTRUTOR|⚒ BUILDER MODE|⚒ MODO CONSTRUCTOR
 MAPAS DA COMUNIDADE|COMMUNITY MAPS|MAPAS DE LA COMUNIDAD
 Seu labirinto. Suas regras.|Your maze. Your rules.|Tu laberinto. Tus reglas.
@@ -294,38 +294,187 @@ Mostrar ou esconder mapa (M)|Show or hide map (M)|Mostrar u ocultar mapa (M)
 Mapa da fase|Level map|Mapa del nivel
 Mapa com sua posição, fusíveis e saída|Map with your position, fuses and exit|Mapa con tu posición, fusibles y salida
 `;
-const dictionaries={en:{},es:{}};
-for(const row of rows.trim().split('\n')){const [pt,en,es]=row.split('|');dictionaries.en[pt]=en;dictionaries.es[pt]=es;}
-const patterns=[
- [/^Fusíveis necessários: (\d+)\. Encontre a saída\.$/, 'Fuses required: $1. Find the exit.', 'Fusibles necesarios: $1. Encuentra la salida.'],
- [/^O passado ficou para trás\. Backrooms Glitch concluída! Tempo total: (.*)$/, 'The past is behind you. Backrooms Glitch complete! Total time: $1', 'El pasado quedó atrás. ¡Backrooms Glitch completado! Tiempo total: $1'],
- [/^(\d+) \/ (\d+) missões concluídas$/, '$1 / $2 missions completed', '$1 / $2 misiones completadas'],
- [/^Explorador: (.*)$/, 'Explorer: $1', 'Explorador: $1'],
- [/^Jogue nas (\d+) fases disponíveis\.$/, 'Play all $1 available levels.', 'Juega en los $1 niveles disponibles.'],
- [/^Tesouro de (\d+)$/, '$1-coin treasure', 'Tesoro de $1 monedas'],
- [/^Acumule (\d+) moedas de saldo em uma partida Normal\.$/, 'Hold $1 coins in a Normal game.', 'Acumula $1 monedas en una partida Normal.'],
- [/^Vença (\d+) partidas?\.$/, 'Win $1 games.', 'Gana $1 partidas.'],
- [/^Você completou a expedição das Backrooms! Tempo total: (.*)$/, 'You completed the Backrooms expedition! Total time: $1', '¡Completaste la expedición de las Backrooms! Tiempo total: $1'],
- [/^A equipe avança para (.*) em instantes…$/, 'The team moves to $1 shortly…', 'El equipo pasa a $1 en unos instantes…'],
- [/^Escapou com os 3 fusíveis em (.*)$/, 'Escaped with all 3 fuses in $1', 'Escapaste con los 3 fusibles en $1'],
- [/^Vocês escaparam juntos em (.*)$/, 'You escaped together in $1', 'Escaparon juntos en $1'],
- [/^(\d+) online · Todas as salas$/, '$1 online · All rooms', '$1 en línea · Todas las salas'],
- [/^Envie este código aos amigos: (.*)$/, 'Send this code to friends: $1', 'Envía este código a tus amigos: $1'],
- [/^(\d+) \/ 4 jogadores · Inicie quando todos estiverem aqui\.$/, '$1 / 4 players · Start when everyone is here.', '$1 / 4 jugadores · Empieza cuando estén todos.'],
- [/^(\d+) \/ 4 jogadores · Aguardando o anfitrião iniciar\.$/, '$1 / 4 players · Waiting for the host.', '$1 / 4 jugadores · Esperando al anfitrión.'],
- [/^FASE (\d+) \/ (\d+) · (.*)$/, 'LEVEL $1 / $2 · $3', 'NIVEL $1 / $2 · $3'],
- [/^SALA (.*)$/, 'ROOM $1', 'SALA $1'],
- ];
-let language='pt';try{const saved=localStorage.getItem('backrooms.language');if(['pt','en','es'].includes(saved))language=saved;}catch{}
-function translate(text){if(language==='pt')return text;const key=text.trim(),dict=dictionaries[language];let value=dict[key];if(!value)for(const [re,en,es]of patterns)if(re.test(key)){value=key.replace(re,language==='en'?en:es);break;}if(!value&&/^(WASD |LS MOVER)/.test(key)){value=key;for(const [a,b]of Object.entries({MOVER:language==='en'?'MOVE':'MOVERSE',OLHAR:language==='en'?'LOOK':'MIRAR',CORRER:language==='en'?'SPRINT':'CORRER',LANTERNA:language==='en'?'FLASHLIGHT':'LINTERNA',REVIVER:language==='en'?'REVIVE':'REVIVIR'}))value=value.replaceAll(a,b);}return value?text.replace(key,value):text;}
-const originals=new WeakMap(),attributes=new WeakMap();
-function skip(node){return !!node.parentElement?.closest('script,style,textarea,[translate="no"],.chat-message,.leaderboard-row span,#roster strong,#teamStatus,#padKeyboardValue');}
-function textNode(node){if(skip(node))return;const current=node.nodeValue;let data=originals.get(node);if(!data||current!==data.output)data={source:current};const output=translate(data.source);if(output!==current)node.nodeValue=output;data.output=output;originals.set(node,data);}
-function element(node){if(node.closest?.('[translate="no"]'))return;let data=attributes.get(node)||{};for(const key of ['placeholder','aria-label','title']){const current=node.getAttribute(key);if(current===null)continue;if(!data[key]||data[key].output!==current)data[key]={source:current};const output=translate(data[key].source);if(output!==current)node.setAttribute(key,output);data[key].output=output;}attributes.set(node,data);}
-function walk(root){if(root.nodeType===3){textNode(root);return;}if(root.nodeType!==1)return;element(root);const walker=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT);let n;while(n=walker.nextNode()){if(n.nodeType===3)textNode(n);else element(n);}}
-const config={subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['placeholder','aria-label','title']};
-const observer=new MutationObserver(records=>{observer.disconnect();for(const record of records){if(record.type==='childList')for(const n of record.addedNodes)walk(n);else if(record.type==='characterData')textNode(record.target);else element(record.target);}observer.observe(document.body,config);});
-const select=document.getElementById('languageSelect');
-function setLanguage(value){if(!['pt','en','es'].includes(value))return;language=value;observer.disconnect();document.documentElement.lang=language==='pt'?'pt-BR':language;walk(document.body);select.value=language;document.getElementById('languageLabel').textContent={pt:'🌐 IDIOMA',en:'🌐 LANGUAGE',es:'🌐 IDIOMA'}[language];try{localStorage.setItem('backrooms.language',language);}catch{}observer.observe(document.body,config);}
-select.addEventListener('change',()=>setLanguage(select.value));select.addEventListener('keydown',event=>event.stopPropagation());select.addEventListener('pointerdown',()=>document.dispatchEvent(new Event('game-language-change')));
-window.gameI18n={t:translate,setLanguage};setLanguage(language);
+const dictionaries = { en: {}, es: {} };
+for (const row of rows.trim().split('\n')) {
+  const [pt, en, es] = row.split('|');
+  dictionaries.en[pt] = en;
+  dictionaries.es[pt] = es;
+}
+const patterns = [
+  [
+    /^Fusíveis necessários: (\d+)\. Encontre a saída\.$/,
+    'Fuses required: $1. Find the exit.',
+    'Fusibles necesarios: $1. Encuentra la salida.',
+  ],
+  [
+    /^O passado ficou para trás\. Backrooms Glitch concluída! Tempo total: (.*)$/,
+    'The past is behind you. Backrooms Glitch complete! Total time: $1',
+    'El pasado quedó atrás. ¡Backrooms Glitch completado! Tiempo total: $1',
+  ],
+  [
+    /^(\d+) \/ (\d+) missões concluídas$/,
+    '$1 / $2 missions completed',
+    '$1 / $2 misiones completadas',
+  ],
+  [/^Explorador: (.*)$/, 'Explorer: $1', 'Explorador: $1'],
+  [
+    /^Jogue nas (\d+) fases disponíveis\.$/,
+    'Play all $1 available levels.',
+    'Juega en los $1 niveles disponibles.',
+  ],
+  [/^Tesouro de (\d+)$/, '$1-coin treasure', 'Tesoro de $1 monedas'],
+  [
+    /^Acumule (\d+) moedas de saldo em uma partida Normal\.$/,
+    'Hold $1 coins in a Normal game.',
+    'Acumula $1 monedas en una partida Normal.',
+  ],
+  [/^Vença (\d+) partidas?\.$/, 'Win $1 games.', 'Gana $1 partidas.'],
+  [
+    /^Você completou a expedição das Backrooms! Tempo total: (.*)$/,
+    'You completed the Backrooms expedition! Total time: $1',
+    '¡Completaste la expedición de las Backrooms! Tiempo total: $1',
+  ],
+  [
+    /^A equipe avança para (.*) em instantes…$/,
+    'The team moves to $1 shortly…',
+    'El equipo pasa a $1 en unos instantes…',
+  ],
+  [
+    /^Escapou com os 3 fusíveis em (.*)$/,
+    'Escaped with all 3 fuses in $1',
+    'Escapaste con los 3 fusibles en $1',
+  ],
+  [/^Vocês escaparam juntos em (.*)$/, 'You escaped together in $1', 'Escaparon juntos en $1'],
+  [/^(\d+) online · Todas as salas$/, '$1 online · All rooms', '$1 en línea · Todas las salas'],
+  [
+    /^Envie este código aos amigos: (.*)$/,
+    'Send this code to friends: $1',
+    'Envía este código a tus amigos: $1',
+  ],
+  [
+    /^(\d+) \/ 4 jogadores · Inicie quando todos estiverem aqui\.$/,
+    '$1 / 4 players · Start when everyone is here.',
+    '$1 / 4 jugadores · Empieza cuando estén todos.',
+  ],
+  [
+    /^(\d+) \/ 4 jogadores · Aguardando o anfitrião iniciar\.$/,
+    '$1 / 4 players · Waiting for the host.',
+    '$1 / 4 jugadores · Esperando al anfitrión.',
+  ],
+  [/^FASE (\d+) \/ (\d+) · (.*)$/, 'LEVEL $1 / $2 · $3', 'NIVEL $1 / $2 · $3'],
+  [/^SALA (.*)$/, 'ROOM $1', 'SALA $1'],
+];
+let language = 'pt';
+try {
+  const saved = localStorage.getItem('backrooms.language');
+  if (['pt', 'en', 'es'].includes(saved)) language = saved;
+} catch {}
+function translate(text) {
+  if (language === 'pt') return text;
+  const key = text.trim(),
+    dict = dictionaries[language];
+  let value = dict[key];
+  if (!value)
+    for (const [re, en, es] of patterns)
+      if (re.test(key)) {
+        value = key.replace(re, language === 'en' ? en : es);
+        break;
+      }
+  if (!value && /^(WASD |LS MOVER)/.test(key)) {
+    value = key;
+    for (const [a, b] of Object.entries({
+      MOVER: language === 'en' ? 'MOVE' : 'MOVERSE',
+      OLHAR: language === 'en' ? 'LOOK' : 'MIRAR',
+      CORRER: language === 'en' ? 'SPRINT' : 'CORRER',
+      LANTERNA: language === 'en' ? 'FLASHLIGHT' : 'LINTERNA',
+      REVIVER: language === 'en' ? 'REVIVE' : 'REVIVIR',
+    }))
+      value = value.replaceAll(a, b);
+  }
+  return value ? text.replace(key, value) : text;
+}
+const originals = new WeakMap(),
+  attributes = new WeakMap();
+function skip(node) {
+  return !!node.parentElement?.closest(
+    'script,style,textarea,[translate="no"],.chat-message,.leaderboard-row span,#roster strong,#teamStatus,#padKeyboardValue',
+  );
+}
+function textNode(node) {
+  if (skip(node)) return;
+  const current = node.nodeValue;
+  let data = originals.get(node);
+  if (!data || current !== data.output) data = { source: current };
+  const output = translate(data.source);
+  if (output !== current) node.nodeValue = output;
+  data.output = output;
+  originals.set(node, data);
+}
+function element(node) {
+  if (node.closest?.('[translate="no"]')) return;
+  let data = attributes.get(node) || {};
+  for (const key of ['placeholder', 'aria-label', 'title']) {
+    const current = node.getAttribute(key);
+    if (current === null) continue;
+    if (!data[key] || data[key].output !== current) data[key] = { source: current };
+    const output = translate(data[key].source);
+    if (output !== current) node.setAttribute(key, output);
+    data[key].output = output;
+  }
+  attributes.set(node, data);
+}
+function walk(root) {
+  if (root.nodeType === 3) {
+    textNode(root);
+    return;
+  }
+  if (root.nodeType !== 1) return;
+  element(root);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    if (n.nodeType === 3) textNode(n);
+    else element(n);
+  }
+}
+const config = {
+  subtree: true,
+  childList: true,
+  characterData: true,
+  attributes: true,
+  attributeFilter: ['placeholder', 'aria-label', 'title'],
+};
+const observer = new MutationObserver(records => {
+  observer.disconnect();
+  for (const record of records) {
+    if (record.type === 'childList') for (const n of record.addedNodes) walk(n);
+    else if (record.type === 'characterData') textNode(record.target);
+    else element(record.target);
+  }
+  observer.observe(document.body, config);
+});
+const select = document.getElementById('languageSelect');
+function setLanguage(value) {
+  if (!['pt', 'en', 'es'].includes(value)) return;
+  language = value;
+  observer.disconnect();
+  document.documentElement.lang = language === 'pt' ? 'pt-BR' : language;
+  walk(document.body);
+  select.value = language;
+  document.getElementById('languageLabel').textContent = {
+    pt: '🌐 IDIOMA',
+    en: '🌐 LANGUAGE',
+    es: '🌐 IDIOMA',
+  }[language];
+  try {
+    localStorage.setItem('backrooms.language', language);
+  } catch {}
+  observer.observe(document.body, config);
+}
+select.addEventListener('change', () => setLanguage(select.value));
+select.addEventListener('keydown', event => event.stopPropagation());
+select.addEventListener('pointerdown', () =>
+  document.dispatchEvent(new Event('game-language-change')),
+);
+window.gameI18n = { t: translate, setLanguage };
+setLanguage(language);
