@@ -2,6 +2,7 @@
 // 5 s; tick de 20 Hz enquanto houver jogadores conectados. Cada socket recebe só a sua zona.
 import { ApiError, json } from './http.js';
 import { creditPlayer } from './inventory.js';
+import { saveRun } from './ranking.js';
 import { createExpedition, stepWorld, tickWorld, viewFor } from './world-sim.js';
 
 const TICK_MS = 50,
@@ -133,6 +134,13 @@ class WorldDO {
         for (const [item, qty] of Object.entries(items)) all[item] = (all[item] || 0) + qty;
         return all;
       }, {});
+    }
+    // Toda expedição terminada (saíram todos, venceram ou o gerador apagou) entra no ranking.
+    if (state.status !== 'playing' && !state.runSaved && this.env?.DB) {
+      state.runSaved = true;
+      await saveRun(this.env.DB, state, Date.now()).catch(error =>
+        console.error('Falha ao salvar no ranking', error),
+      );
     }
     if ((state.status === 'failed' || state.status === 'won') && !state.failReported) {
       state.failReported = true;

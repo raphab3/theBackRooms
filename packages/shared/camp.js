@@ -19,6 +19,12 @@ export const BUILDINGS = [
   { id: 'b1', level: 'poolrooms', name: 'Poolrooms', x: 37, y: 22, door: 'west' },
   // Área do chefão: trancada até a equipe sobreviver à 5ª noite; lá dentro não tem volta.
   { id: 'b2', level: 'glitch', name: 'Área do Chefão', x: 6, y: 22, door: 'east', boss: true },
+  // Etapa 5: mais níveis clássicos nos cantos e no sul, portas viradas para o gerador.
+  { id: 'b3', level: 'habitable', name: 'Nível 1 · Habitável', x: 8, y: 8, door: 'east' },
+  { id: 'b4', level: 'electrical', name: 'Nível 2 · Elétrica', x: 36, y: 8, door: 'west' },
+  { id: 'b5', level: 'office', name: 'Escritório', x: 36, y: 36, door: 'west' },
+  { id: 'b6', level: 'woodrooms', name: 'Woodrooms', x: 8, y: 36, door: 'east' },
+  { id: 'b7', level: 'fun', name: 'Nível Fun', x: 22, y: 38, door: 'north' },
 ];
 
 /** Semente do interior de cada edificação (o cliente gera o mesmo labirinto que o servidor). */
@@ -104,5 +110,7 @@ export const REVEAL_RADIUS = { camp: 6, building: 3 }; // células reveladas em 
 export const MISSION_REWARD = { coins: 20, items: { scrap: 6, core_fire: 1 } }; // por quem está lá
 export const BOSS_UNLOCK_NIGHT = 5; // sobreviver a esta noite destrava a área do chefão
 export const BOSS = { name: 'O Zelador', hp: 600, speed: 1.3 };
-export const ENEMY_SPEED = 0.9; // entidade comum, células/s
+export const ENEMY_SPEED = 0.9; // entidade comum, células/s, na 1ª noite
+/** As entidades das edificações aceleram 8% a cada noite que passa (até +60%). */
+export const enemySpeed = night => ENEMY_SPEED * (1 + Math.min(0.6, 0.08 * night));
 export const FUSE_REACH = 0.55;

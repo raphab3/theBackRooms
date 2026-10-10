@@ -425,6 +425,40 @@ function renderStation({ arms, items }) {
     };
 }
 $('stationClose').onclick = closeStation;
+
+// --- Ranking do mundo aberto: vitórias primeiro, depois quem sobreviveu a mais noites ---
+async function openRanking() {
+  openStationId = 'ranking';
+  keys.clear();
+  $('station').hidden = false;
+  $('stationError').textContent = '';
+  $('stationTitle').textContent = '🏆 Ranking por noites';
+  $('stationBody').textContent = 'Carregando…';
+  try {
+    const response = await fetch('/api/ranking/nights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }),
+      data = await response.json();
+    if (!response.ok) throw Error(data.error || 'O ranking não respondeu.');
+    const minutes = ms => `${Math.round(ms / 60000)} min`;
+    $('stationBody').innerHTML = data.runs.length
+      ? data.runs
+          .map(
+            (r, i) =>
+              `<div class="stat"><small>${i + 1}º · ${r.team
+                .map(p => `<span style="color:${escapeHtml(p.color)}">${escapeHtml(p.name)}</span>`)
+                .join(
+                  ', ',
+                )}</small><span>${r.won ? '👑 venceu · ' : ''}🌙 ${r.nights} · ${minutes(r.durationMs)}</span></div>`,
+          )
+          .join('')
+      : '<p class="cost">Nenhuma expedição terminada ainda. Sobrevivam e entrem aqui!</p>';
+  } catch (e) {
+    $('stationError').textContent = e.message;
+  }
+}
 function useStation() {
   const station = nearStation();
   if (station) void openStation(station.id);
@@ -443,7 +477,7 @@ function jump() {
 addEventListener('keydown', e => {
   if (!socket || document.activeElement === $('chatInput')) return;
   if (openStationId) {
-    if (e.key === 'Escape' || e.code === 'KeyE') closeStation();
+    if (e.key === 'Escape' || e.code === 'KeyE' || e.code === 'KeyR') closeStation();
     return;
   }
   if (e.code === 'KeyE') return useStation();
@@ -451,6 +485,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') jump();
   if (EMOTE_KEYS[e.code]) emote(EMOTE_KEYS[e.code]);
   if (e.code === 'KeyG') socket.send({ t: 'leaveParty' });
+  if (e.code === 'KeyR') void openRanking();
   keys.add(e.code);
 });
 addEventListener('keyup', e => keys.delete(e.code));
@@ -528,6 +563,7 @@ const ACTIONS = {
   chat: () => openChat(),
   use: () => useStation(),
   party: () => socket?.send({ t: 'leaveParty' }),
+  ranking: () => void openRanking(),
 };
 for (const b of document.querySelectorAll('#actions button'))
   b.onclick = e => {

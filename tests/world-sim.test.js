@@ -16,9 +16,12 @@ import {
   PORTAL,
   RESPAWN_MS,
   SCRAP_FUEL,
+  buildingSeed,
+  createCamp,
   waveSize,
 } from '@backrooms/shared/camp.js';
 import { countItem } from '@backrooms/shared/loot.js';
+import { createWorld, findRoute } from '@backrooms/shared/world.js';
 import { newPlayer } from '../worker/players.js';
 import { createExpedition, stepWorld, tickWorld, viewFor } from '../worker/world-sim.js';
 
@@ -38,7 +41,24 @@ describe('mundo aberto', () => {
     expect(a.zone).toBe('camp');
     expect(Math.hypot(a.x - CAMP_SPAWN.x, a.y - CAMP_SPAWN.y)).toBeLessThan(1);
     expect(countItem(a.bag, 'almond')).toBe(2);
-    expect(Object.keys(state.zones)).toEqual(['b0', 'b1', 'b2']);
+    expect(Object.keys(state.zones)).toEqual(['b0', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7']);
+  });
+
+  it('em qualquer semente, toda porta se alcança do acampamento e todo fusível e painel de dentro', () => {
+    for (const seed of [1, 4242, 99991, 123456789]) {
+      const camp = createCamp(seed),
+        from = [Math.floor(CAMP_SPAWN.x), Math.floor(CAMP_SPAWN.y)];
+      camp.buildings.forEach((b, i) => {
+        const door = [Math.floor(b.doorAt.x), Math.floor(b.doorAt.y)];
+        expect(findRoute(camp.grid, ...from, ...door).length, `${seed} ${b.id}`).toBeGreaterThan(0);
+        const world = createWorld(buildingSeed(seed, i), b.level);
+        for (const t of [...world.fuses, world.exit])
+          expect(
+            findRoute(world.grid, 1, 1, Math.floor(t.x), Math.floor(t.y)).length,
+            `${seed} ${b.level}`,
+          ).toBeGreaterThan(0);
+      });
+    }
   });
 
   it('entra pela porta, sai pela entrada e volta para a frente da porta', () => {

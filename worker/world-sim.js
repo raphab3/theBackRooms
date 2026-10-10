@@ -10,6 +10,7 @@ import {
   DAY_MS,
   ENEMY_SPEED,
   ENTER_GRACE_MS,
+  enemySpeed,
   FUSE_REACH,
   FUEL_DRAIN,
   FUEL_MAX,
@@ -532,7 +533,7 @@ function tickWorld(state, now) {
       enemy.path = paths[0]?.slice(1) || [];
       enemy.pathAt = now;
     }
-    let remaining = dt * (enemy.speed || ENEMY_SPEED);
+    let remaining = dt * (zone.boss ? enemy.speed : enemySpeed(state.clock.night));
     while (remaining > 0 && enemy.path.length) {
       const [tx, ty] = enemy.path[0],
         dx = tx + 0.5 - enemy.x,
