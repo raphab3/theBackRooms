@@ -2,6 +2,7 @@
 // Cada jogador está numa zona ('camp' ou o id de uma edificação) e só interage com ela.
 import { almondSaveChance, damageMultiplier } from '@backrooms/shared/arms.js';
 import {
+  CARTOGRAPHER,
   CAMP_SIZE,
   CAMP_SPAWN,
   DAY_MS,
@@ -11,9 +12,11 @@ import {
   GENERATOR_CENTER,
   GENERATOR_HP,
   GENERATOR_OFF_FAIL_MS,
+  MAP_PRICE,
   MONSTERS,
   NIGHT_MS,
   REFUEL_REACH,
+  REVEAL_RADIUS,
   SCRAP_FUEL,
   SCRAP_REPAIR,
   WAVE_SPAWN_MS,
@@ -49,6 +52,7 @@ const ACTIONS = [
   'use',
   'leave',
   'refuel',
+  'buyMap',
   'shoot',
   'salvageStart',
   'salvage',
@@ -69,7 +73,7 @@ function createExpedition({ code, seed, players, lobbyKey = null, now }) {
       busySince: 0,
     };
   });
-  return {
+  const state = {
     code,
     seed,
     lobbyKey,
@@ -83,6 +87,13 @@ function createExpedition({ code, seed, players, lobbyKey = null, now }) {
     generator: { fuel: FUEL_MAX, hp: GENERATOR_HP, offSince: 0 },
     monsters: [],
     spawnQueue: [],
+    // Névoa do mini mapa: célula vista (1) ou não (0) por zona; a versão sobe a cada mudança.
+    map: { owned: false },
+    explored: Object.fromEntries([
+      ['camp', Array(CAMP_SIZE * CAMP_SIZE).fill(0)],
+      ...Object.entries(zones).map(([id, z]) => [id, Array(z.world.grid.length ** 2).fill(0)]),
+    ]),
+    exploreVersion: {},
     balance: 0,
     effects: [],
     messages: [],
@@ -104,6 +115,8 @@ function createExpedition({ code, seed, players, lobbyKey = null, now }) {
       left: false,
     })),
   };
+  for (const p of state.players) reveal(state, p);
+  return state;
 }
 
 const gridOf = (state, zone) => (zone === 'camp' ? state.camp.grid : state.zones[zone].world.grid);
@@ -174,6 +187,7 @@ function stepWorld(state, action, body, now) {
   if (action === 'use') return use(state, p, now);
   if (action === 'leave') return leave(state, p, body, now);
   if (action === 'refuel') return refuel(state, p);
+  if (action === 'buyMap') return buyMap(state, p);
   if (action === 'shoot') return shoot(state, p, body, now);
   if (action === 'salvageStart' || action === 'salvage')
     return salvage(state, p, action, body, now);
@@ -186,6 +200,7 @@ function use(state, p, now) {
     const b = state.camp.buildings.find(v => distance(p, v.doorAt) <= USE_REACH);
     if (b) {
       moveTo(p, b.id, INSIDE_EXIT, now);
+      reveal(state, p);
       const zone = state.zones[b.id];
       if (!state.players.some(v => v !== p && v.zone === b.id && v.alive)) zone.busySince = now;
       return { zone: b.id };
@@ -199,6 +214,7 @@ function use(state, p, now) {
   if (distance(p, INSIDE_EXIT) <= USE_REACH) {
     const b = state.camp.buildings.find(v => v.id === p.zone);
     moveTo(p, 'camp', b.doorAt, now);
+    reveal(state, p);
     return { zone: 'camp' };
   }
   throw new ApiError('A saída é por onde você entrou.');
@@ -317,6 +333,40 @@ function refuel(state, p) {
   return { fuel: g.fuel, hp: g.hp };
 }
 
+// Mesa do cartógrafo: o mapa é da equipe inteira e mostra tudo o que já foi andado.
+function buyMap(state, p) {
+  if (p.zone !== 'camp' || distance(p, CARTOGRAPHER) > USE_REACH)
+    throw new ApiError('Vá até a mesa do cartógrafo.');
+  if (state.map.owned) throw new ApiError('A equipe já tem o mapa.');
+  if (state.balance < MAP_PRICE)
+    throw new ApiError(
+      `O mapa custa ${MAP_PRICE} moedas da equipe (vocês têm ${state.balance}).`,
+      409,
+    );
+  state.balance -= MAP_PRICE;
+  state.map.owned = true;
+  return { map: true };
+}
+
+/** Revela as células em volta do jogador na zona dele. */
+function reveal(state, p) {
+  const cells = state.explored[p.zone],
+    size = Math.round(Math.sqrt(cells.length)),
+    r = p.zone === 'camp' ? REVEAL_RADIUS.camp : REVEAL_RADIUS.building;
+  let changed = false;
+  for (let y = Math.max(0, Math.floor(p.y - r)); y <= Math.min(size - 1, Math.floor(p.y + r)); y++)
+    for (
+      let x = Math.max(0, Math.floor(p.x - r));
+      x <= Math.min(size - 1, Math.floor(p.x + r));
+      x++
+    )
+      if (!cells[y * size + x] && Math.hypot(x + 0.5 - p.x, y + 0.5 - p.y) <= r) {
+        cells[y * size + x] = 1;
+        changed = true;
+      }
+  if (changed) state.exploreVersion[p.zone] = (state.exploreVersion[p.zone] || 0) + 1;
+}
+
 function salvage(state, p, action, body, now) {
   const pile = lootOf(state, p.zone).piles?.find(v => v.id === body.pile && !v.salvaged);
   if (!pile || distance(p, pile) > SALVAGE_REACH)
@@ -340,6 +390,7 @@ function sync(state, p, body, now) {
   p.seq = body.seq;
   const previous = p.moveClock,
     movement = validateMovement({ world: { grid: gridOf(state, p.zone) } }, p, body, now, previous);
+  reveal(state, p);
   const loot = lootOf(state, p.zone);
   if (p.zone !== 'camp') {
     const zone = state.zones[p.zone];
@@ -378,6 +429,7 @@ function tickWorld(state, now) {
       p.protectedUntil = now + 5000;
       p.bag = [];
       moveTo(p, 'camp', CAMP_SPAWN, now);
+      reveal(state, p);
     }
   if (state.status === 'playing') {
     tickClock(state, now);
@@ -622,6 +674,7 @@ function viewFor(state, playerId, now) {
       bags: loot.bags.map(({ id, owner, ownerName, x, y }) => ({ id, owner, ownerName, x, y })),
       drops: loot.drops || [],
     },
+    map: { owned: state.map.owned, version: state.exploreVersion[zoneId] || 0 },
     clock: {
       phase: state.clock.phase,
       night: state.clock.night,
@@ -653,4 +706,4 @@ function viewFor(state, playerId, now) {
   };
 }
 
-export { createExpedition, stepWorld, tickWorld, viewFor };
+export { createExpedition, reveal, stepWorld, tickWorld, viewFor };

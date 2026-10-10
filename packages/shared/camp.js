@@ -6,6 +6,7 @@ export const CAMP_SIZE = 48; // células (o cliente desenha 1 célula = 2 m)
 export const GENERATOR = { x: 24, y: 24 }; // canto superior esquerdo do bloco 2×2 do gerador
 export const CAMP_SPAWN = { x: 24.5, y: 28.5 };
 export const PORTAL = { x: 24.5, y: 32.5 };
+export const CARTOGRAPHER = { x: 20.5, y: 28.5 }; // mesa onde se compra o mini mapa
 export const USE_REACH = 1.3; // células: porta, saída e portal
 export const LEAVE_MS = 2000; // segurar E no portal para voltar ao Posto Zero
 export const RESPAWN_MS = 30000; // quem é pego volta ao acampamento depois disso
@@ -53,6 +54,7 @@ export function createCamp(seed) {
   const keepClear = [
     { x: GENERATOR.x + 1, y: GENERATOR.y + 1, r: 7 },
     { ...PORTAL, r: 3 },
+    { ...CARTOGRAPHER, r: 2 },
     ...BUILDINGS.map(b => ({ ...doorPoint(b), r: 3 })),
   ];
   const pylons = [];
@@ -90,3 +92,7 @@ export const MONSTERS = {
 export const waveSize = night => ({ scrap: 1 + night * 2, apparition: Math.floor(night / 2) + 1 });
 /** Raio da área segura em células: 3 com o gerador quase vazio, até 9 com o tanque cheio. */
 export const safeRadius = (fuel, on) => (on ? 3 + (6 * fuel) / FUEL_MAX : 0);
+
+// --- Etapa 3: mini mapa ---
+export const MAP_PRICE = 15; // moedas da equipe
+export const REVEAL_RADIUS = { camp: 6, building: 3 }; // células reveladas em volta de quem anda

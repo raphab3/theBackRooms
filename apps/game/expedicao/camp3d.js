@@ -2,7 +2,14 @@
 // luz da área segura, as edificações (porta e letreiro) e o portal de volta ao Posto Zero.
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { CAMP_SIZE, GENERATOR, GENERATOR_CENTER, PORTAL } from '@backrooms/shared/camp.js';
+import {
+  CAMP_SIZE,
+  CARTOGRAPHER,
+  GENERATOR,
+  GENERATOR_CENTER,
+  MAP_PRICE,
+  PORTAL,
+} from '@backrooms/shared/camp.js';
 import { wallpaper } from '../lobby/scene.js';
 import { S } from './level.js';
 
@@ -137,6 +144,43 @@ export function buildCamp(root, camp, scene) {
       door.position.z,
     );
   }
+
+  // Mesa do cartógrafo: um tampo com o mapa aberto em cima.
+  const table = new THREE.Group(),
+    top = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.08, 0.9),
+      new THREE.MeshLambertMaterial({ color: 0x6b4a2b }),
+    ),
+    paper = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.1, 0.7),
+      new THREE.MeshBasicMaterial({ color: 0xe9dfb8 }),
+    );
+  top.position.y = 0.95;
+  paper.rotation.x = -Math.PI / 2;
+  paper.position.y = 1;
+  for (const [x, z] of [
+    [-0.6, -0.35],
+    [0.6, -0.35],
+    [-0.6, 0.35],
+    [0.6, 0.35],
+  ]) {
+    const leg = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.95, 0.07),
+      new THREE.MeshLambertMaterial({ color: 0x4a3420 }),
+    );
+    leg.position.set(x, 0.47, z);
+    table.add(leg);
+  }
+  table.add(top, paper);
+  table.position.set(CARTOGRAPHER.x * S, 0, CARTOGRAPHER.y * S);
+  root.add(table);
+  label(
+    root,
+    `<b>CARTÓGRAFO</b><br>mapa da equipe: ${MAP_PRICE} moedas`,
+    table.position.x,
+    2.4,
+    table.position.z,
+  );
 
   // Portal de volta ao Posto Zero.
   const portal = new THREE.Group(),

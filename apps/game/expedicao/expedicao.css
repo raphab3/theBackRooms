@@ -165,3 +165,36 @@
 #team {
   top: 112px;
 }
+
+#minimap {
+  top: 96px;
+  right: 12px;
+  padding: 6px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+#minimap canvas {
+  display: block;
+  width: 180px;
+  height: 180px;
+  image-rendering: pixelated;
+}
+#minimap p {
+  margin: 4px 0 0;
+  max-width: 180px;
+}
+@media (pointer: coarse) {
+  #minimap {
+    top: 52px;
+  }
+  #minimap canvas {
+    width: 120px;
+    height: 120px;
+  }
+}
+#minimap [hidden],
+#minimap[hidden] {
+  display: none;
+}

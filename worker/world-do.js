@@ -110,11 +110,25 @@ class WorldDO {
   }
 
   broadcast(now = Date.now()) {
+    this.mapSent ??= new WeakMap();
     for (const ws of this.ctx.getWebSockets()) {
       const { id } = ws.deserializeAttachment() || {};
       if (!id) continue;
       try {
-        ws.send(JSON.stringify({ type: 'world', view: viewFor(this.state, id, now) }));
+        const view = viewFor(this.state, id, now);
+        ws.send(JSON.stringify({ type: 'world', view }));
+        // A névoa do mini mapa só vai quando muda (e só para quem tem o mapa).
+        const key = `${view.zone}:${view.map.version}`;
+        if (view.map.owned && this.mapSent.get(ws) !== key) {
+          this.mapSent.set(ws, key);
+          ws.send(
+            JSON.stringify({
+              type: 'map',
+              zone: view.zone,
+              cells: this.state.explored[view.zone].join(''),
+            }),
+          );
+        }
       } catch {}
     }
   }

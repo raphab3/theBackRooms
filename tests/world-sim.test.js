@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   CAMP_SPAWN,
+  CARTOGRAPHER,
   DAY_MS,
   ENTER_GRACE_MS,
   GENERATOR_CENTER,
   GENERATOR_OFF_FAIL_MS,
   LEAVE_MS,
+  MAP_PRICE,
   NIGHT_MS,
   PORTAL,
   RESPAWN_MS,
@@ -199,6 +201,34 @@ describe('mundo aberto', () => {
       tickWorld(state, T0 + 1000 + GENERATOR_OFF_FAIL_MS);
       expect(state.status).toBe('failed');
       expect(state.players.every(p => p.left && !p.bag.length)).toBe(true);
+    });
+  });
+
+  describe('mini mapa', () => {
+    it('a névoa se abre em volta de quem anda, por zona', () => {
+      const { state, a } = setup(),
+        camp = state.explored.camp,
+        cell = (x, y) => camp[y * 48 + x];
+      expect(cell(Math.floor(a.x), Math.floor(a.y))).toBe(1); // onde nasceu já está revelado
+      expect(cell(5, 5)).toBe(0);
+      const version = state.exploreVersion.camp;
+      stepWorld(state, 'sync', { ...auth(a), seq: 1, x: a.x, y: a.y - 0.4, a: 0 }, T0 + 500);
+      expect(state.exploreVersion.camp).toBeGreaterThanOrEqual(version);
+      at(a, state.camp.buildings[0].doorAt);
+      stepWorld(state, 'use', auth(a), T0 + 600);
+      expect(state.explored.b0[1 * 21 + 1]).toBe(1); // a entrada da edificação aparece
+    });
+
+    it('comprar exige estar na mesa e moedas da equipe; o mapa vale para todos', () => {
+      const { state, a } = setup();
+      expect(() => stepWorld(state, 'buyMap', auth(a), T0)).toThrow('cartógrafo');
+      at(a, CARTOGRAPHER);
+      expect(() => stepWorld(state, 'buyMap', auth(a), T0 + 100)).toThrow(`${MAP_PRICE} moedas`);
+      state.balance = MAP_PRICE + 3;
+      stepWorld(state, 'buyMap', auth(a), T0 + 200);
+      expect(state.balance).toBe(3);
+      expect(viewFor(state, state.players[1].id, T0 + 300).map.owned).toBe(true);
+      expect(() => stepWorld(state, 'buyMap', auth(a), T0 + 400)).toThrow('já tem');
     });
   });
 });

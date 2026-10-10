@@ -6,10 +6,12 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { cannonColor } from '@backrooms/shared/arms.js';
 import {
   BUILDINGS,
+  CARTOGRAPHER,
   GENERATOR,
   GENERATOR_CENTER,
   INSIDE_EXIT,
   LEAVE_MS,
+  MAP_PRICE,
   PORTAL,
   REFUEL_REACH,
   USE_REACH,
@@ -28,6 +30,7 @@ import { createStats } from '../lobby/stats.js';
 import { buildCamp } from './camp3d.js';
 import { createEffects, createSfx } from './effects.js';
 import { S, buildLevel } from './level.js';
+import { drawMinimap } from './minimap.js';
 
 const $ = id => document.getElementById(id);
 const WALK = 1.85, // células/s, como no jogo clássico
@@ -120,7 +123,11 @@ let ticket = null,
   chargeStart = 0,
   recoil = 0,
   shake = 0,
-  lastShot = 0;
+  lastShot = 0,
+  explored = {}, // névoa do mini mapa por zona ('0'/'1' por célula), vinda do servidor
+  mapShown = true,
+  mapDrawnAt = 0,
+  mapForced = false; // só o debug liga
 
 function send(action, extra = {}) {
   if (ws?.readyState === 1) ws.send(JSON.stringify({ action, reqId: ++reqId, ...extra }));
@@ -158,6 +165,7 @@ function connect() {
   ws.onmessage = event => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'world') applyView(msg.view);
+    else if (msg.type === 'map') explored[msg.zone] = msg.cells;
     else if (msg.type === 'result' && msg.extracted) finish(msg.extracted[ticket.id] || {});
     else if (msg.type === 'error' && msg.error) {
       if (!view) fail(msg.error);
@@ -403,6 +411,8 @@ function useTarget() {
     const door = camp.buildings.find(b => near(b.doorAt));
     if (door) return { kind: 'door', label: `Entrar: ${door.name}` };
     if (near(PORTAL)) return { kind: 'portal', label: 'Segure E para voltar ao Posto Zero' };
+    if (near(CARTOGRAPHER) && !view.map.owned)
+      return { kind: 'map', label: `E — comprar o mapa da equipe (${MAP_PRICE} moedas)` };
     if (Math.hypot(GENERATOR_CENTER.x - me.x, GENERATOR_CENTER.y - me.y) <= REFUEL_REACH)
       return { kind: 'refuel', label: 'E — abastecer o gerador (1 sucata)' };
   } else if (near(INSIDE_EXIT)) return { kind: 'exit', label: 'Sair para o acampamento' };
@@ -418,6 +428,7 @@ function pressUse() {
   if (!target) return;
   if (target.kind === 'door' || target.kind === 'exit') send('use');
   else if (target.kind === 'refuel') send('refuel');
+  else if (target.kind === 'map') send('buyMap');
   else if (target.kind === 'portal') {
     send('use');
     leaveHold = { start: performance.now() };
@@ -461,6 +472,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyE' && !e.repeat) pressUse();
   keys.add(e.code);
   if (e.code === 'KeyF') lantern.visible = !lantern.visible;
+  if (e.code === 'KeyM') mapShown = !mapShown;
 });
 addEventListener('keyup', e => {
   if (e.code === 'Space') releaseShot();
@@ -675,6 +687,23 @@ function frame(now) {
       avatar.root.rotation.y = s.yaw;
       avatar.update(dt, { speed: s.anim === 'down' ? 0 : s.speed, anim: s.anim }, now);
     }
+    // Mini mapa redesenhado ~5 vezes por segundo.
+    $('minimap').hidden = !mapShown;
+    const mapOwned = view.map.owned || mapForced;
+    $('mapCanvas').hidden = !mapOwned;
+    $('mapLocked').hidden = mapOwned;
+    if (mapShown && mapOwned && explored[zoneId] && now - mapDrawnAt > 200) {
+      mapDrawnAt = now;
+      drawMinimap($('mapCanvas'), {
+        grid: zoneGrid,
+        explored: explored[zoneId],
+        zone: zoneId,
+        camp,
+        me,
+        players: view.players,
+        monsters: view.monsters,
+      });
+    }
     const seconds = Math.max(0, Math.floor((view.now - view.startedAt) / 1000));
     $('clock').textContent =
       `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -693,6 +722,12 @@ try {
       pressUse,
       releaseUse,
       view: () => view,
+      zone: () => ({ grid: zoneGrid, world: zoneWorld }),
+      // Só para testar o desenho: finge a névoa vinda do servidor (o servidor continua mandando a real).
+      fakeMap(cells) {
+        explored[zoneId] = cells ?? '1'.repeat(zoneGrid.length ** 2);
+        mapForced = true;
+      },
       // Move e já avisa o servidor (sem esperar um quadro, que pode estar pausado).
       goto(x, y) {
         Object.assign(me, { x, y });
