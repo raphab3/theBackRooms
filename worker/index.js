@@ -2,6 +2,7 @@
 import { api } from './api.js';
 
 export { api };
+export { RoomDO } from './room-do.js';
 
 export default {
   async fetch(request, env) {
