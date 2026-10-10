@@ -2,8 +2,23 @@
 // Cada jogador está numa zona ('camp' ou o id de uma edificação) e só interage com ela.
 import { almondSaveChance, damageMultiplier } from '@backrooms/shared/arms.js';
 import {
+  CAMP_SIZE,
   CAMP_SPAWN,
+  DAY_MS,
   ENTER_GRACE_MS,
+  FUEL_DRAIN,
+  FUEL_MAX,
+  GENERATOR_CENTER,
+  GENERATOR_HP,
+  GENERATOR_OFF_FAIL_MS,
+  MONSTERS,
+  NIGHT_MS,
+  REFUEL_REACH,
+  SCRAP_FUEL,
+  SCRAP_REPAIR,
+  WAVE_SPAWN_MS,
+  safeRadius,
+  waveSize,
   LEAVE_MS,
   PORTAL,
   RESPAWN_MS,
@@ -28,7 +43,17 @@ import { createWorld, findRoute } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 import { validateMovement } from './rooms.js';
 
-const ACTIONS = ['hello', 'sync', 'use', 'leave', 'shoot', 'salvageStart', 'salvage', 'chat'];
+const ACTIONS = [
+  'hello',
+  'sync',
+  'use',
+  'leave',
+  'refuel',
+  'shoot',
+  'salvageStart',
+  'salvage',
+  'chat',
+];
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 function createExpedition({ code, seed, players, lobbyKey = null, now }) {
@@ -53,7 +78,11 @@ function createExpedition({ code, seed, players, lobbyKey = null, now }) {
     status: 'playing',
     camp,
     zones,
-    campLoot: { bags: [], cores: [] },
+    campLoot: { bags: [], cores: [], drops: [] },
+    clock: { phase: 'day', night: 0, endsAt: now + DAY_MS },
+    generator: { fuel: FUEL_MAX, hp: GENERATOR_HP, offSince: 0 },
+    monsters: [],
+    spawnQueue: [],
     balance: 0,
     effects: [],
     messages: [],
@@ -144,6 +173,7 @@ function stepWorld(state, action, body, now) {
   if (!p.alive) throw new ApiError('Você foi pego. Volta ao acampamento em instantes.', 409);
   if (action === 'use') return use(state, p, now);
   if (action === 'leave') return leave(state, p, body, now);
+  if (action === 'refuel') return refuel(state, p);
   if (action === 'shoot') return shoot(state, p, body, now);
   if (action === 'salvageStart' || action === 'salvage')
     return salvage(state, p, action, body, now);
@@ -198,7 +228,8 @@ function shoot(state, p, body, now) {
     if (Math.random() >= almondSaveChance(p.armLevel || 1)) removeItems(p.bag, 'almond', 1);
   }
   p.shotAt = now;
-  const zone = p.zone === 'camp' ? null : state.zones[p.zone],
+  if (p.zone === 'camp') return shootMonsters(state, p, body.a, kind, now);
+  const zone = state.zones[p.zone],
     enemy = zone && !zone.enemy.dead ? zone.enemy : null,
     shot = traceShot(gridOf(state, p.zone), p, body.a, enemy, kind);
   if (shot.hit) {
@@ -219,6 +250,71 @@ function shoot(state, p, body, now) {
     },
   ].slice(-20);
   return { hit: shot.hit };
+}
+
+// No acampamento o braço mira os monstros: o primário acerta o primeiro da linha; o carregado
+// explode onde bater e acerta todos no raio.
+function shootMonsters(state, p, a, kind, now) {
+  const spec = FIRE[kind],
+    grid = state.camp.grid,
+    damage = spec.damage * damageMultiplier(p.armLevel || 1);
+  let end = traceShot(grid, p, a, null, kind).end,
+    first = null;
+  for (const m of state.monsters) {
+    const shot = traceShot(grid, p, a, m, 'primary');
+    if (!shot.hit) continue;
+    const d = distance(p, shot.end);
+    if (!first || d < first.d) first = { m, d, end: shot.end };
+  }
+  if (first) end = first.end;
+  const hits =
+    kind === 'charged'
+      ? state.monsters.filter(m => distance(m, end) <= spec.blast)
+      : first
+        ? [first.m]
+        : [];
+  for (const m of hits) hitMonster(state, m, damage, kind === 'primary' ? now + spec.burnMs : 0);
+  state.effects = [
+    ...state.effects.filter(e => now - e.at < 1000),
+    {
+      id: crypto.randomUUID(),
+      zone: 'camp',
+      by: p.id,
+      kind,
+      from: { x: p.x, y: p.y },
+      to: end,
+      hit: hits.length > 0,
+      at: now,
+    },
+  ].slice(-20);
+  return { hit: hits.length > 0 };
+}
+function hitMonster(state, m, damage, burnUntil) {
+  m.hp -= damage;
+  if (burnUntil) m.burnUntil = burnUntil;
+  if (m.hp > 0) return;
+  state.monsters = state.monsters.filter(v => v !== m);
+  const spec = MONSTERS[m.type];
+  state.campLoot.drops.push({
+    id: crypto.randomUUID(),
+    x: m.x,
+    y: m.y,
+    item: spec.drops,
+    qty: spec.dropQty,
+  });
+}
+
+// E perto do gerador: cada sucata vira combustível e conserto.
+function refuel(state, p) {
+  if (p.zone !== 'camp' || distance(p, GENERATOR_CENTER) > REFUEL_REACH)
+    throw new ApiError('Chegue perto do gerador.');
+  const g = state.generator;
+  if (g.fuel >= FUEL_MAX && g.hp >= GENERATOR_HP) throw new ApiError('O gerador está cheio.');
+  if (!removeItems(p.bag, 'scrap', 1))
+    throw new ApiError('Traga sucata para abastecer o gerador.', 409);
+  g.fuel = Math.min(FUEL_MAX, g.fuel + SCRAP_FUEL);
+  g.hp = Math.min(GENERATOR_HP, g.hp + SCRAP_REPAIR);
+  return { fuel: g.fuel, hp: g.hp };
 }
 
 function salvage(state, p, action, body, now) {
@@ -259,6 +355,10 @@ function sync(state, p, body, now) {
   loot.cores = loot.cores.filter(
     core => distance(p, core) >= PICKUP_REACH || !addItems(p.bag, 'core_fire', 1),
   );
+  if (loot.drops)
+    loot.drops = loot.drops.filter(
+      drop => distance(p, drop) >= PICKUP_REACH || !addItems(p.bag, drop.item, drop.qty),
+    );
   loot.bags = loot.bags.filter(bag => {
     if (distance(p, bag) >= PICKUP_REACH) return true;
     p.carrying.push(bag);
@@ -279,6 +379,11 @@ function tickWorld(state, now) {
       p.bag = [];
       moveTo(p, 'camp', CAMP_SPAWN, now);
     }
+  if (state.status === 'playing') {
+    tickClock(state, now);
+    tickGenerator(state, now, dt);
+    tickMonsters(state, now, dt);
+  }
   for (const [id, zone] of Object.entries(state.zones)) {
     const enemy = zone.enemy,
       hunted = state.players.filter(p => !p.left && p.alive && p.zone === id);
@@ -325,6 +430,133 @@ function tickWorld(state, now) {
     }
     for (const p of hunted)
       if (now >= p.protectedUntil && distance(p, enemy) < 0.43) catchPlayer(state, p, now);
+  }
+}
+
+// Dia → noite: chega uma onda espalhada no começo da noite. Noite → dia: os monstros fogem.
+function tickClock(state, now) {
+  const clock = state.clock;
+  if (now < clock.endsAt) return;
+  if (clock.phase === 'day') {
+    clock.phase = 'night';
+    clock.night++;
+    clock.endsAt = now + NIGHT_MS;
+    for (const [type, count] of Object.entries(waveSize(clock.night)))
+      for (let i = 0; i < count; i++)
+        state.spawnQueue.push({ type, at: now + Math.random() * WAVE_SPAWN_MS });
+  } else {
+    clock.phase = 'day';
+    clock.endsAt = now + DAY_MS;
+    state.monsters = [];
+    state.spawnQueue = [];
+  }
+}
+
+function tickGenerator(state, now, dt) {
+  const g = state.generator;
+  if (g.fuel > 0 && g.hp > 0) g.fuel = Math.max(0, g.fuel - FUEL_DRAIN[state.clock.phase] * dt);
+  if (g.fuel > 0 && g.hp > 0) g.offSince = 0;
+  else {
+    g.offSince ||= now;
+    // Apagado por tempo demais: a expedição fracassa e ninguém leva nada.
+    if (now - g.offSince >= GENERATOR_OFF_FAIL_MS) {
+      state.status = 'failed';
+      for (const p of state.players) Object.assign(p, { left: true, bag: [], carrying: [] });
+    }
+  }
+}
+
+// Ponto de entrada de um monstro: uma célula aberta colada na cerca, num lado sorteado.
+function edgeSpawn(grid) {
+  for (let i = 0; i < 40; i++) {
+    const t = 1 + Math.floor(Math.random() * (CAMP_SIZE - 2)),
+      side = Math.floor(Math.random() * 4),
+      [x, y] = [
+        [t, 1],
+        [t, CAMP_SIZE - 2],
+        [1, t],
+        [CAMP_SIZE - 2, t],
+      ][side];
+    if (grid[y][x] === 0) return { x: x + 0.5, y: y + 0.5 };
+  }
+  return { x: 1.5, y: 1.5 };
+}
+
+function tickMonsters(state, now, dt) {
+  const grid = state.camp.grid,
+    g = state.generator,
+    radius = safeRadius(g.fuel, g.fuel > 0 && g.hp > 0);
+  state.spawnQueue = state.spawnQueue.filter(spawn => {
+    if (now < spawn.at) return true;
+    const spec = MONSTERS[spawn.type];
+    state.monsters.push({
+      id: crypto.randomUUID(),
+      type: spawn.type,
+      ...edgeSpawn(grid),
+      hp: spec.hp,
+      path: [],
+      pathAt: 0,
+    });
+    return false;
+  });
+  const campers = state.players.filter(p => !p.left && p.alive && p.zone === 'camp');
+  for (const m of [...state.monsters]) {
+    const spec = MONSTERS[m.type];
+    if ((m.burnUntil || 0) > now) hitMonster(state, m, FIRE.primary.burnDps * dt, 0);
+    if (m.hp <= 0) continue;
+    // Monstro de sucata vai no gerador. Aparição caça quem está fora da luz; sem ninguém fora,
+    // ronda a borda da área segura.
+    let target = GENERATOR_CENTER;
+    if (m.type === 'apparition') {
+      const prey = campers
+        .filter(p => now >= p.protectedUntil && distance(p, GENERATOR_CENTER) > radius)
+        .sort((a, b) => distance(a, m) - distance(b, m))[0];
+      if (prey) target = prey;
+      else {
+        const d = distance(m, GENERATOR_CENTER) || 1;
+        target = {
+          x: GENERATOR_CENTER.x + ((m.x - GENERATOR_CENTER.x) / d) * (radius + 1.5),
+          y: GENERATOR_CENTER.y + ((m.y - GENERATOR_CENTER.y) / d) * (radius + 1.5),
+        };
+      }
+    }
+    if (now - m.pathAt > 1000) {
+      const route = findRoute(
+        grid,
+        Math.floor(m.x),
+        Math.floor(m.y),
+        Math.floor(target.x),
+        Math.floor(target.y),
+      );
+      m.path = route.slice(1);
+      m.pathAt = now;
+    }
+    let remaining = dt * spec.speed;
+    while (remaining > 0 && m.path.length) {
+      const [tx, ty] = m.path[0],
+        dx = tx + 0.5 - m.x,
+        dy = ty + 0.5 - m.y,
+        d = Math.hypot(dx, dy);
+      if (d < 0.001) {
+        m.path.shift();
+        continue;
+      }
+      const step = Math.min(d, remaining);
+      m.x += (dx / d) * step;
+      m.y += (dy / d) * step;
+      remaining -= step;
+      if (step === d) m.path.shift();
+    }
+    if (m.type === 'scrap' && distance(m, GENERATOR_CENTER) <= 1.8 && g.hp > 0)
+      g.hp = Math.max(0, g.hp - spec.biteDps * dt);
+    if (m.type === 'apparition')
+      for (const p of campers)
+        if (
+          now >= p.protectedUntil &&
+          distance(p, m) < 0.5 &&
+          distance(p, GENERATOR_CENTER) > radius
+        )
+          catchPlayer(state, p, now);
   }
 }
 
@@ -388,7 +620,34 @@ function viewFor(state, playerId, now) {
       almonds: (loot.almonds || []).filter(v => !v.taken).map(({ id, x, y }) => ({ id, x, y })),
       cores: loot.cores,
       bags: loot.bags.map(({ id, owner, ownerName, x, y }) => ({ id, owner, ownerName, x, y })),
+      drops: loot.drops || [],
     },
+    clock: {
+      phase: state.clock.phase,
+      night: state.clock.night,
+      endsIn: Math.max(0, state.clock.endsAt - now),
+    },
+    generator: {
+      fuel: state.generator.fuel,
+      hp: state.generator.hp,
+      on: state.generator.fuel > 0 && state.generator.hp > 0,
+      offFor: state.generator.offSince ? now - state.generator.offSince : 0,
+      safeRadius: safeRadius(
+        state.generator.fuel,
+        state.generator.fuel > 0 && state.generator.hp > 0,
+      ),
+    },
+    monsters:
+      zoneId === 'camp'
+        ? state.monsters.map(({ id, type, x, y, hp }) => ({
+            id,
+            type,
+            x,
+            y,
+            hp,
+            maxHp: MONSTERS[type].hp,
+          }))
+        : [],
     effects: state.effects.filter(e => e.zone === zoneId && now - e.at < 1000),
     messages: state.messages.slice(-8),
   };

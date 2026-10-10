@@ -7,9 +7,11 @@ import { cannonColor } from '@backrooms/shared/arms.js';
 import {
   BUILDINGS,
   GENERATOR,
+  GENERATOR_CENTER,
   INSIDE_EXIT,
   LEAVE_MS,
   PORTAL,
+  REFUEL_REACH,
   USE_REACH,
   buildingSeed,
   createCamp,
@@ -280,8 +282,22 @@ function syncRemotes() {
 
 const zoneName = zone =>
   zone === 'camp' ? 'acampamento' : BUILDINGS.find(b => b.id === zone)?.name || zone;
+const clockText = ms => {
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 function renderHud() {
   $('coins').textContent = view.balance;
+  const night = view.clock.phase === 'night';
+  $('cycle').textContent = night
+    ? `🌙 Noite ${view.clock.night} · amanhece em ${clockText(view.clock.endsIn)}${view.monsters.length ? ` · ${view.monsters.length} monstros` : ''}`
+    : `☀ Dia ${view.clock.night + 1} · anoitece em ${clockText(view.clock.endsIn)}`;
+  const g = view.generator,
+    gen = g.on
+      ? `Gerador ⛽ ${Math.round(g.fuel)}% · ❤ ${Math.round(g.hp)}%`
+      : `<span class="warn">GERADOR APAGADO · ${Math.max(0, Math.ceil((45000 - g.offFor) / 1000))} s para tudo acabar</span>`;
+  if (gen !== $('gen').dataset.html) $('gen').innerHTML = $('gen').dataset.html = gen;
+  if (view.status === 'failed' && !ended) failed();
   const team = view.team
     .map(
       p =>
@@ -309,6 +325,15 @@ function renderHud() {
 }
 const escapeHtml = text => String(text).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 
+function failed() {
+  ended = true;
+  $('endTitle').textContent = 'O gerador apagou';
+  $('endSummary').textContent = 'A escuridão tomou o acampamento. A expedição fracassou.';
+  $('endLoot').textContent = 'As mochilas ficaram para trás.';
+  $('end').hidden = false;
+  $('down').hidden = true;
+  setTimeout(backToLobby, RETURN_MS);
+}
 function finish(mine) {
   ended = true;
   const loot = Object.entries(mine)
@@ -351,8 +376,14 @@ function releaseShot() {
   lastShot = now;
   send('shoot', { kind, a: me.a });
   // Desenha na hora com o mesmo traçado do servidor (o dano chega no próximo estado).
-  const enemy = view.enemy && !view.enemy.dead ? view.enemy : null,
-    shot = traceShot(zoneGrid, me, me.a, enemy, kind),
+  // No acampamento, o alvo é o monstro mais próximo na linha de tiro.
+  const candidates = view.enemy && !view.enemy.dead ? [view.enemy] : view.monsters,
+    shots = candidates.map(t => traceShot(zoneGrid, me, me.a, t, 'primary')).filter(r => r.hit),
+    shot =
+      shots.sort(
+        (a, b) =>
+          Math.hypot(a.end.x - me.x, a.end.y - me.y) - Math.hypot(b.end.x - me.x, b.end.y - me.y),
+      )[0] || traceShot(zoneGrid, me, me.a, null, kind),
     from = new THREE.Vector3();
   muzzle.getWorldPosition(from);
   effects.fire(from, new THREE.Vector3(shot.end.x * S, 1.3, shot.end.y * S), kind === 'charged');
@@ -372,6 +403,8 @@ function useTarget() {
     const door = camp.buildings.find(b => near(b.doorAt));
     if (door) return { kind: 'door', label: `Entrar: ${door.name}` };
     if (near(PORTAL)) return { kind: 'portal', label: 'Segure E para voltar ao Posto Zero' };
+    if (Math.hypot(GENERATOR_CENTER.x - me.x, GENERATOR_CENTER.y - me.y) <= REFUEL_REACH)
+      return { kind: 'refuel', label: 'E — abastecer o gerador (1 sucata)' };
   } else if (near(INSIDE_EXIT)) return { kind: 'exit', label: 'Sair para o acampamento' };
   let pile = null;
   for (const v of view.loot.piles) {
@@ -384,6 +417,7 @@ function pressUse() {
   const target = useTarget();
   if (!target) return;
   if (target.kind === 'door' || target.kind === 'exit') send('use');
+  else if (target.kind === 'refuel') send('refuel');
   else if (target.kind === 'portal') {
     send('use');
     leaveHold = { start: performance.now() };
@@ -630,7 +664,7 @@ function frame(now) {
       if (view.enemy) level.moveEnemy(view.enemy, dt);
       hum.set(1 - Math.min(1, level.nearestLamp(me.x * S, me.y * S) / 5));
     } else {
-      campScene?.update(now / 1000);
+      campScene?.update(now / 1000, view, dt);
       // No acampamento, o zumbido vem do gerador.
       hum.set(1 - Math.min(1, Math.hypot(me.x - GENERATOR.x - 1, me.y - GENERATOR.y - 1) / 10));
     }

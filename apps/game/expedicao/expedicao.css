@@ -154,3 +154,14 @@
     transform: translateX(-50%);
   }
 }
+
+#cycle {
+  font-weight: 700;
+}
+#gen .warn {
+  color: var(--danger);
+  font-weight: 700;
+}
+#team {
+  top: 112px;
+}

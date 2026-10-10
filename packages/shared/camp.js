@@ -69,3 +69,24 @@ export function createCamp(seed) {
     buildings: BUILDINGS.map(b => ({ ...b, foot: FOOT, doorAt: doorPoint(b) })),
   };
 }
+
+// --- Etapa 2: dia e noite, gerador e monstros (valores iniciais para teste de sensação) ---
+export const DAY_MS = 150000;
+export const NIGHT_MS = 90000;
+export const GENERATOR_CENTER = { x: GENERATOR.x + 1, y: GENERATOR.y + 1 };
+export const GENERATOR_HP = 100;
+export const FUEL_MAX = 100;
+export const FUEL_DRAIN = { day: 0.2, night: 0.5 }; // por segundo
+export const SCRAP_FUEL = 8; // cada sucata no gerador
+export const SCRAP_REPAIR = 5;
+export const REFUEL_REACH = 2.4; // células do centro do gerador
+export const GENERATOR_OFF_FAIL_MS = 45000; // apagado por esse tempo: a expedição fracassa
+export const WAVE_SPAWN_MS = 60000; // a onda chega espalhada no começo da noite
+export const MONSTERS = {
+  scrap: { name: 'Monstro de sucata', hp: 30, speed: 1.5, biteDps: 6, drops: 'scrap', dropQty: 2 },
+  apparition: { name: 'Aparição', hp: 15, speed: 2.4, drops: 'almond', dropQty: 1 },
+};
+/** Tamanho da onda da noite n: cresce a cada noite. */
+export const waveSize = night => ({ scrap: 1 + night * 2, apparition: Math.floor(night / 2) + 1 });
+/** Raio da área segura em células: 3 com o gerador quase vazio, até 9 com o tanque cheio. */
+export const safeRadius = (fuel, on) => (on ? 3 + (6 * fuel) / FUEL_MAX : 0);

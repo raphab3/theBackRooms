@@ -132,6 +132,19 @@ class WorldDO {
     const now = Date.now();
     tickWorld(this.state, now);
     this.broadcast(now);
+    // Gerador apagou de vez: avisa o Posto Zero uma vez (expedição sem vitória nem recursos).
+    if (this.state.status === 'failed' && !this.state.failReported) {
+      this.state.failReported = true;
+      if (this.state.lobbyKey && this.env.LOBBIES)
+        this.ctx.waitUntil?.(
+          this.env.LOBBIES.get(this.env.LOBBIES.idFromName(this.state.lobbyKey))
+            .fetch('https://lobby.internal/result', {
+              method: 'POST',
+              body: JSON.stringify({ won: false, loot: {} }),
+            })
+            .catch(() => {}),
+        );
+    }
     if (now - (this.savedAt || 0) >= SAVE_MS) {
       this.savedAt = now;
       this.ctx.waitUntil?.(this.ctx.storage.put('state', this.state));

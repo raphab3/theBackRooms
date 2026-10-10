@@ -2,11 +2,12 @@
 // luz da área segura, as edificações (porta e letreiro) e o portal de volta ao Posto Zero.
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { CAMP_SIZE, GENERATOR, PORTAL } from '@backrooms/shared/camp.js';
+import { CAMP_SIZE, GENERATOR, GENERATOR_CENTER, PORTAL } from '@backrooms/shared/camp.js';
 import { wallpaper } from '../lobby/scene.js';
 import { S } from './level.js';
 
-const SKY = 0xc4c8bd;
+const SKY = 0xc4c8bd,
+  NIGHT_SKY = 0x0c0f18;
 
 function groundTexture() {
   const canvas = document.createElement('canvas');
@@ -43,7 +44,8 @@ function label(root, html, x, y, z) {
 export function buildCamp(root, camp, scene) {
   scene.background = new THREE.Color(SKY);
   scene.fog = new THREE.Fog(SKY, 18, 85);
-  root.add(new THREE.HemisphereLight(0xf1f2e6, 0x5b5432, 2.2));
+  const hemi = new THREE.HemisphereLight(0xf1f2e6, 0x5b5432, 2.2);
+  root.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff3d6, 1.2);
   sun.position.set(30, 60, 10);
   root.add(sun);
@@ -163,11 +165,158 @@ export function buildCamp(root, camp, scene) {
     portal.position.z,
   );
 
+  // Anel no chão marcando a área segura (cresce com o combustível do gerador).
+  const safeRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.96, 1, 64),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd76a,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+    }),
+  );
+  safeRing.rotation.x = -Math.PI / 2;
+  safeRing.position.set(GENERATOR_CENTER.x * S, 0.03, GENERATOR_CENTER.y * S);
+  root.add(safeRing);
+
+  const monsters = new Map(),
+    drops = new Map(),
+    sky = new THREE.Color(),
+    daySky = new THREE.Color(SKY),
+    nightSky = new THREE.Color(NIGHT_SKY);
+  let night = 0, // 0 = dia, 1 = noite, com transição suave
+    lastT = null;
+
   return {
-    update(t) {
+    update(t, view, dt) {
       ring.rotation.z = t;
       veil.material.opacity = 0.3 + Math.sin(t * 2) * 0.1;
-      light.intensity = 28 + Math.sin(t * 13) * 1.5;
+      if (!view) return;
+      // Dia ↔ noite em ~3 s pelo relógio real (aba em segundo plano não congela a transição).
+      const elapsed = lastT === null ? 10 : t - lastT;
+      lastT = t;
+      night += ((view.clock.phase === 'night' ? 1 : 0) - night) * Math.min(1, elapsed / 3);
+      sky.copy(daySky).lerp(nightSky, night);
+      scene.background.copy(sky);
+      scene.fog.color.copy(sky);
+      scene.fog.near = 18 - 12 * night;
+      scene.fog.far = 85 - 55 * night;
+      hemi.intensity = 2.2 - 1.95 * night;
+      sun.intensity = 1.2 * (1 - night);
+      // Gerador: luz e área segura seguem o combustível; apagado, tudo escurece.
+      const g = view.generator,
+        radius = g.safeRadius * S;
+      light.intensity = g.on ? (28 + Math.sin(t * 13) * 1.5) * (0.5 + 0.5 * night) + 10 : 0;
+      light.distance = Math.max(1, radius * 1.6);
+      lamp.material.color.set(g.on ? 0xffd76a : 0x2a2a2a);
+      safeRing.visible = g.on;
+      safeRing.scale.setScalar(Math.max(0.01, radius));
+      syncMonsters(view.monsters, t, dt);
+      syncDrops(view.loot);
     },
   };
+
+  // Monstros: sucata (caixas enferrujadas, olhos vermelhos) e aparição (vulto branco que pisca).
+  function makeMonster(m) {
+    const g = new THREE.Group();
+    if (m.type === 'scrap') {
+      const rust = new THREE.MeshLambertMaterial({ color: 0x7a4b2a });
+      for (const [w, h, d, x, y, z] of [
+        [0.9, 0.8, 0.7, 0, 0.5, 0],
+        [0.5, 0.5, 0.5, 0.25, 1.1, 0.1],
+        [0.7, 0.15, 0.3, -0.3, 0.9, -0.2],
+      ]) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), rust);
+        box.position.set(x, y, z);
+        g.add(box);
+      }
+      for (const side of [-0.1, 0.12]) {
+        const eye = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.06, 0.02),
+          new THREE.MeshBasicMaterial({ color: 0xff2a1a }),
+        );
+        eye.position.set(0.25 + side, 1.15, 0.36);
+        g.add(eye);
+      }
+    } else {
+      const ghost = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 2.3, 0.3),
+        new THREE.MeshBasicMaterial({ color: 0xe8f2ff, transparent: true, opacity: 0.55 }),
+      );
+      ghost.position.y = 1.3;
+      g.add(ghost);
+      g.userData.ghost = ghost;
+    }
+    const bar = document.createElement('div'),
+      fill = document.createElement('div');
+    bar.className = 'hpBar';
+    bar.append(fill);
+    const label = new CSS2DObject(bar);
+    label.position.y = 2.6;
+    g.add(label);
+    g.userData.fill = fill;
+    g.userData.bar = bar;
+    g.position.set(m.x * S, 0, m.y * S);
+    root.add(g);
+    return g;
+  }
+  function syncMonsters(list, t, dt) {
+    const seen = new Set();
+    for (const m of list) {
+      seen.add(m.id);
+      let g = monsters.get(m.id);
+      if (!g) monsters.set(m.id, (g = makeMonster(m)));
+      // Suaviza até a posição do servidor (20 Hz) e olha para onde anda.
+      const tx = m.x * S,
+        tz = m.y * S,
+        dx = tx - g.position.x,
+        dz = tz - g.position.z;
+      if (Math.hypot(dx, dz) > 0.01) g.rotation.y = Math.atan2(dx, dz);
+      g.position.x += dx * Math.min(1, dt * 10);
+      g.position.z += dz * Math.min(1, dt * 10);
+      g.userData.fill.style.width = `${(100 * m.hp) / m.maxHp}%`;
+      g.userData.bar.hidden = m.hp >= m.maxHp;
+      if (g.userData.ghost)
+        g.userData.ghost.material.opacity = 0.35 + Math.abs(Math.sin(t * 9 + g.position.x)) * 0.35;
+      else g.position.y = Math.abs(Math.sin(t * 10 + g.position.x)) * 0.06;
+    }
+    for (const [id, g] of monsters)
+      if (!seen.has(id)) {
+        g.userData.bar.remove();
+        root.remove(g);
+        monsters.delete(id);
+      }
+  }
+  // Itens no chão do acampamento: o que os monstros soltam e mochilas de quem foi pego aqui.
+  function syncDrops(loot) {
+    const seen = new Set(),
+      items = [
+        ...(loot.drops || []).map(d => ({ ...d, kind: d.item })),
+        ...(loot.bags || []).map(b => ({ ...b, kind: 'bag' })),
+        ...(loot.cores || []).map(c => ({ ...c, kind: 'core_fire' })),
+      ];
+    for (const item of items) {
+      seen.add(item.id);
+      if (drops.has(item.id)) continue;
+      const color = { scrap: 0x8a8f96, almond: 0x9fe7ff, core_fire: 0xff7a1a, bag: 0x5a3b22 }[
+          item.kind
+        ],
+        mesh = new THREE.Mesh(
+          item.kind === 'bag'
+            ? new THREE.BoxGeometry(0.5, 0.35, 0.3)
+            : new THREE.BoxGeometry(0.3, 0.3, 0.3),
+          item.kind === 'bag' || item.kind === 'scrap'
+            ? new THREE.MeshLambertMaterial({ color })
+            : new THREE.MeshBasicMaterial({ color }),
+        );
+      mesh.position.set(item.x * S, 0.3, item.y * S);
+      root.add(mesh);
+      drops.set(item.id, mesh);
+    }
+    for (const [id, mesh] of drops)
+      if (!seen.has(id)) {
+        root.remove(mesh);
+        drops.delete(id);
+      }
+  }
 }
