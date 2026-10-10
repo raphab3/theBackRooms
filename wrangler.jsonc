@@ -26,4 +26,5 @@
     "bindings": [{ "name": "ROOMS", "class_name": "RoomDO" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
+  "analytics_engine_datasets": [{ "binding": "TELEMETRY", "dataset": "backrooms_telemetry" }],
 }

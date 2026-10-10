@@ -13,7 +13,8 @@
     "build": "node scripts/copy-admin.mjs && pnpm --filter @backrooms/game build",
     "release": "pnpm build && wrangler d1 migrations apply backrooms --remote && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply backrooms --local",
-    "test": "node tests/netsync.mjs && node tests/multiplayer.mjs && node --test 'packages/shared/*.test.ts' && vitest run",
+    "test": "node tests/netsync.mjs && node tests/multiplayer.mjs && node tests/telemetry.mjs && node --test 'packages/shared/*.test.ts' && vitest run",
+    "load": "node tests/load.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "check": "prettier --check . && eslint . && pnpm test"

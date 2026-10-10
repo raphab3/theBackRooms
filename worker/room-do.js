@@ -1,6 +1,7 @@
 import { ApiError, json } from './http.js';
 import { TTL, beginPhase, safeRoom, tickRoom } from './rooms.js';
 import { ROOM_ACTIONS, stepRoom } from './room-actions.js';
+import { recordPlayers, recordRtt, recordSocketError, track } from './telemetry.js';
 
 const TICK_MS = 50, // 20 Hz
   SAVE_MS = 5000,
@@ -173,6 +174,7 @@ class RoomDO {
     const { reqId = null, action, ...body } = msg;
     try {
       if (!SOCKET_ACTIONS.includes(action)) throw new ApiError('Ação não encontrada.', 404);
+      if (body.rtt !== undefined) recordRtt(this.env, this.room?.code, body.id, body.rtt);
       ws.send(JSON.stringify({ type: 'result', reqId, ...this.run(action, body) }));
     } catch (error) {
       const failed = JSON.parse(await this.failure(error).text());
@@ -189,7 +191,8 @@ class RoomDO {
     this.afterDisconnect(ws);
   }
 
-  webSocketError(ws) {
+  webSocketError(ws, error) {
+    recordSocketError(this.env, this.room?.code, error?.message || 'error');
     this.afterDisconnect(ws);
   }
 
@@ -211,6 +214,19 @@ class RoomDO {
 
   tick() {
     if (!this.room || !this.ctx.getWebSockets().length) return this.stopTick();
+    const started = performance.now();
+    this.stepTick();
+    // Telemetria amostrada: o pior tick e os jogadores conectados a cada 5 s (não 20 pontos/s).
+    this.worstTick = Math.max(this.worstTick || 0, performance.now() - started);
+    if (Date.now() - (this.lastReport || 0) >= SAVE_MS) {
+      this.lastReport = Date.now();
+      track(this.env, 'tick', this.room?.code, this.worstTick);
+      recordPlayers(this.env, this.room?.code, this.ctx.getWebSockets().length);
+      this.worstTick = 0;
+    }
+  }
+
+  stepTick() {
     const room = this.room,
       now = Date.now(),
       before = `${room.status}|${room.round}`;

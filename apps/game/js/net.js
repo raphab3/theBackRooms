@@ -16,7 +16,8 @@ import { INPUT_INTERVAL_MS, PredictionHistory, SnapshotBuffer, reconnectDelay } 
 import { game } from './state.js';
 
 const REQUEST_TIMEOUT_MS = 8000,
-  HEARTBEAT_MS = 1000;
+  HEARTBEAT_MS = 1000,
+  PING_MS = 5000;
 
 const history = new PredictionHistory(),
   remoteBuffer = new SnapshotBuffer();
@@ -29,6 +30,8 @@ let net = null,
   reconnectTimer = null,
   reconnectAttempt = 0,
   lastBeat = 0,
+  lastPing = 0,
+  lastRtt,
   requestId = 0,
   sceneRound = -1;
 function showPanel(which) {
@@ -148,6 +151,7 @@ function roomPayload() {
     y: game.player.y,
     a: game.player.a,
     respawns: net.respawns || 0,
+    ...(lastRtt === undefined ? {} : { rtt: lastRtt }),
   };
 }
 function roomAction(action, payload = roomPayload()) {
@@ -158,7 +162,7 @@ function roomAction(action, payload = roomPayload()) {
         pending.delete(reqId);
         reject(Error('A conexão demorou demais. Confira a internet e tente novamente.'));
       }, REQUEST_TIMEOUT_MS);
-    pending.set(reqId, { resolve, reject, timer });
+    pending.set(reqId, { resolve, reject, timer, sent: performance.now() });
     socket.send(JSON.stringify({ ...payload, action, reqId }));
   });
 }
@@ -176,7 +180,11 @@ function sendInput() {
   // Parado, só um batimento por segundo mantém o jogador ativo na sala.
   if (!live && now - lastBeat < HEARTBEAT_MS) return;
   lastBeat = now;
-  socket.send(JSON.stringify({ ...roomPayload(), action: 'sync' }));
+  // A cada 5 s o sync vai com reqId: a resposta mede o RTT, que segue nos próximos syncs (telemetria).
+  if (now - lastPing >= PING_MS) {
+    lastPing = now;
+    void roomAction('sync').catch(() => {});
+  } else socket.send(JSON.stringify({ ...roomPayload(), action: 'sync' }));
 }
 function openSocket() {
   clearTimeout(reconnectTimer);
@@ -238,6 +246,7 @@ function handleServerMessage(raw) {
     if (request) {
       pending.delete(msg.reqId);
       clearTimeout(request.timer);
+      lastRtt = Math.round(performance.now() - request.sent);
       if (msg.type === 'result') request.resolve(msg);
       else request.reject(Object.assign(Error(msg.error), { status: msg.status }));
     }
