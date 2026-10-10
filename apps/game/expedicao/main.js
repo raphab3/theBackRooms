@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { cannonColor } from '@backrooms/shared/arms.js';
 import {
+  BOSS,
+  BOSS_UNLOCK_NIGHT,
   BUILDINGS,
   CARTOGRAPHER,
   GENERATOR,
@@ -308,6 +310,19 @@ function renderHud() {
       : `<span class="warn">GERADOR APAGADO · ${Math.max(0, Math.ceil((45000 - g.offFor) / 1000))} s para tudo acabar</span>`;
   if (gen !== $('gen').dataset.html) $('gen').innerHTML = $('gen').dataset.html = gen;
   if (view.status === 'failed' && !ended) failed();
+  if (view.status === 'won' && !ended) won(view.me?.prize || {});
+  const m = view.mission,
+    mission = m
+      ? m.done
+        ? '✔ Luz religada'
+        : `Missão: ${m.fuses.filter(Boolean).length}/${m.fuses.length} fusíveis → painel no fundo`
+      : view.enemy?.boss
+        ? view.enemy.dead
+          ? `${BOSS.name} caiu!`
+          : `${BOSS.name} · ❤ ${Math.ceil(view.enemy.hp)}/${view.enemy.maxHp}`
+        : '';
+  $('mission').hidden = !mission;
+  if ($('mission').textContent !== mission) $('mission').textContent = mission;
   const team = view.team
     .map(
       p =>
@@ -340,6 +355,20 @@ function failed() {
   $('endTitle').textContent = 'O gerador apagou';
   $('endSummary').textContent = 'A escuridão tomou o acampamento. A expedição fracassou.';
   $('endLoot').textContent = 'As mochilas ficaram para trás.';
+  $('end').hidden = false;
+  $('down').hidden = true;
+  setTimeout(backToLobby, RETURN_MS);
+}
+function won(mine) {
+  ended = true;
+  const loot = Object.entries(mine)
+    .map(([item, qty]) => `${qty} ${ITEMS[item].name}`)
+    .join(', ');
+  $('endTitle').textContent = 'Vitória!';
+  $('endSummary').textContent = `${BOSS.name} caiu. A equipe venceu a expedição.`;
+  $('endLoot').textContent = loot
+    ? `Você levou: ${loot}. Guardado no seu estoque.`
+    : 'Você venceu de mãos vazias, mas venceu.';
   $('end').hidden = false;
   $('down').hidden = true;
   setTimeout(backToLobby, RETURN_MS);
@@ -411,13 +440,32 @@ function useTarget() {
   if (!view || !me.alive || ended) return null;
   if (zoneId === 'camp') {
     const door = camp.buildings.find(b => near(b.doorAt));
+    if (door?.boss && !view.bossUnlocked)
+      return {
+        kind: 'door',
+        label: `🔒 ${door.name}: sobrevivam à ${BOSS_UNLOCK_NIGHT}ª noite para abrir`,
+      };
+    if (door?.boss) return { kind: 'door', label: `Entrar: ${door.name} (sem volta até vencer)` };
     if (door) return { kind: 'door', label: `Entrar: ${door.name}` };
     if (near(PORTAL)) return { kind: 'portal', label: 'Segure E para voltar ao Posto Zero' };
     if (near(CARTOGRAPHER) && !view.map.owned)
       return { kind: 'map', label: `E — comprar o mapa da equipe (${MAP_PRICE} moedas)` };
     if (Math.hypot(GENERATOR_CENTER.x - me.x, GENERATOR_CENTER.y - me.y) <= REFUEL_REACH)
       return { kind: 'refuel', label: 'E — abastecer o gerador (1 sucata)' };
-  } else if (near(INSIDE_EXIT)) return { kind: 'exit', label: 'Sair para o acampamento' };
+  } else if (near(INSIDE_EXIT))
+    return {
+      kind: 'exit',
+      label: view.mission ? 'Sair para o acampamento' : 'Sem volta: derrotem o chefão',
+    };
+  else if (view.mission && !view.mission.done && near(zoneWorld.exit)) {
+    const missing = view.mission.fuses.filter(taken => !taken).length;
+    return {
+      kind: 'panel',
+      label: missing
+        ? `Painel sem energia: faltam ${missing} fusível(is)`
+        : 'E — religar o painel (a luz volta e a entidade apaga)',
+    };
+  }
   let pile = null;
   for (const v of view.loot.piles) {
     const d = Math.hypot(v.x - me.x, v.y - me.y);
@@ -428,7 +476,7 @@ function useTarget() {
 function pressUse() {
   const target = useTarget();
   if (!target) return;
-  if (target.kind === 'door' || target.kind === 'exit') send('use');
+  if (target.kind === 'door' || target.kind === 'exit' || target.kind === 'panel') send('use');
   else if (target.kind === 'refuel') send('refuel');
   else if (target.kind === 'map') send('buyMap');
   else if (target.kind === 'portal') {
@@ -644,7 +692,10 @@ function stepSelf(dt, now) {
   }
   // Coice do braço; cor pelo nível (muda no 4, 7 e 10) e brilho/mira crescendo ao carregar.
   // Lanterna mais fraca colada na parede, para a mancha de luz não estourar a tela.
-  const wall = zoneGrid ? rayToWall(zoneGrid, me.x, me.y, me.a, 3) * S : 6,
+  // Mede no centro e nas bordas do facho (parede ao lado também estoura).
+  const wall = zoneGrid
+      ? Math.min(...[0, -0.45, 0.45].map(o => rayToWall(zoneGrid, me.x, me.y, me.a + o, 3))) * S
+      : 6,
     power = LANTERN_POWER * Math.min(1, Math.max(0.1, (wall + 0.3) / 3) ** 1.4);
   lantern.intensity += (power - lantern.intensity) * Math.min(1, dt * 10);
   recoil = Math.max(0, recoil - dt * 6);
@@ -669,10 +720,12 @@ function frame(now) {
     stepUse(now);
     effects.update(dt);
     if (level) {
-      // O construtor do interior espera fusíveis (missões chegam na etapa 4): todos escondidos.
+      // Fusíveis da missão (na área do chefão não tem missão: escondidos e sem painel).
       level.update(
         {
-          fuses: zoneWorld.fuses.map(() => true),
+          fuses: view.mission?.fuses || zoneWorld.fuses.map(() => true),
+          done: view.mission?.done,
+          panel: !!view.mission,
           collectedCoins: view.collectedCoins,
           enemy: view.enemy,
           loot: view.loot,

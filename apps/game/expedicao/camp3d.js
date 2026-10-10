@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import {
+  BOSS_UNLOCK_NIGHT,
   CAMP_SIZE,
   CARTOGRAPHER,
   GENERATOR,
@@ -117,7 +118,9 @@ export function buildCamp(root, camp, scene) {
   // Edificações: bloco com papel de parede, porta escura com moldura e o nome do nível.
   const wallMat = new THREE.MeshLambertMaterial({ map: wallpaper() }),
     doorMat = new THREE.MeshBasicMaterial({ color: 0x1a1710 }),
-    frameMat = new THREE.MeshBasicMaterial({ color: 0xe8c547 });
+    frameMat = new THREE.MeshBasicMaterial({ color: 0xe8c547 }),
+    bossFrameMat = new THREE.MeshBasicMaterial({ color: 0xc0392b });
+  const doorTags = new Map();
   for (const b of camp.buildings) {
     const w = b.foot * S,
       height = 7,
@@ -136,12 +139,16 @@ export function buildCamp(root, camp, scene) {
     door.position.set((d.x + face[0] * 0.49) * S, 0, (d.y + face[1] * 0.49) * S);
     door.rotation.y = Math.atan2(-face[0], -face[1]);
     root.add(door);
-    label(
-      root,
-      `<b>${b.name.toUpperCase()}</b><br>chegue perto e aperte E`,
-      door.position.x,
-      3.6,
-      door.position.z,
+    if (b.boss) frame.material = bossFrameMat; // moldura vermelha: a porta do chefão
+    doorTags.set(
+      b.id,
+      label(
+        root,
+        `<b>${b.name.toUpperCase()}</b><br>chegue perto e aperte E`,
+        door.position.x,
+        3.6,
+        door.position.z,
+      ).element,
     );
   }
 
@@ -236,6 +243,22 @@ export function buildCamp(root, camp, scene) {
       ring.rotation.z = t;
       veil.material.opacity = 0.3 + Math.sin(t * 2) * 0.1;
       if (!view) return;
+      // Placas das portas: fusíveis, luz religada, trancada.
+      for (const b of view.buildings || []) {
+        const tag = doorTags.get(b.id),
+          info = camp.buildings.find(v => v.id === b.id),
+          name = info.name.toUpperCase(),
+          html = b.locked
+            ? `<b>🔒 ${name}</b><br>abre depois da ${BOSS_UNLOCK_NIGHT}ª noite`
+            : b.bossDown
+              ? `<b>${name}</b><br>chefão derrotado`
+              : b.done
+                ? `<b>✔ ${name}</b><br>luz religada`
+                : info.boss
+                  ? `<b>${name}</b><br>aberta · sem volta até vencer`
+                  : `<b>${name}</b><br>fusíveis ${b.fuses}/${b.need} · E entra`;
+        if (tag && tag.dataset.html !== html) tag.innerHTML = tag.dataset.html = html;
+      }
       // Dia ↔ noite em ~3 s pelo relógio real (aba em segundo plano não congela a transição).
       const elapsed = lastT === null ? 10 : t - lastT;
       lastT = t;

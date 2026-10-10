@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BOSS,
+  BOSS_UNLOCK_NIGHT,
   CAMP_SPAWN,
+  INSIDE_EXIT,
+  MISSION_REWARD,
   CARTOGRAPHER,
   DAY_MS,
   ENTER_GRACE_MS,
@@ -34,7 +38,7 @@ describe('mundo aberto', () => {
     expect(a.zone).toBe('camp');
     expect(Math.hypot(a.x - CAMP_SPAWN.x, a.y - CAMP_SPAWN.y)).toBeLessThan(1);
     expect(countItem(a.bag, 'almond')).toBe(2);
-    expect(Object.keys(state.zones)).toEqual(['b0', 'b1']);
+    expect(Object.keys(state.zones)).toEqual(['b0', 'b1', 'b2']);
   });
 
   it('entra pela porta, sai pela entrada e volta para a frente da porta', () => {
@@ -229,6 +233,75 @@ describe('mundo aberto', () => {
       expect(state.balance).toBe(3);
       expect(viewFor(state, state.players[1].id, T0 + 300).map.owned).toBe(true);
       expect(() => stepWorld(state, 'buyMap', auth(a), T0 + 400)).toThrow('já tem');
+    });
+  });
+
+  describe('missões e chefão', () => {
+    const enter = (state, p, id, now) => {
+      at(p, state.camp.buildings.find(b => b.id === id).doorAt);
+      return stepWorld(state, 'use', auth(p), now);
+    };
+
+    it('fusíveis são da equipe; com todos, o painel religa a luz, apaga a entidade e paga', () => {
+      const { state, a, b } = setup(),
+        zone = state.zones.b0;
+      enter(state, a, 'b0', T0 + 100);
+      enter(state, b, 'b0', T0 + 100);
+      at(a, zone.world.exit);
+      expect(() => stepWorld(state, 'use', auth(a), T0 + 200)).toThrow('Faltam 3');
+      // Cada um pega um fusível andando por cima (o servidor confere a posição no sync).
+      zone.world.fuses.forEach((f, i) => {
+        const p = i % 2 ? b : a;
+        at(p, f);
+        stepWorld(state, 'sync', { ...auth(p), seq: 10 + i, x: f.x, y: f.y, a: 0 }, T0 + 300);
+      });
+      expect(zone.mission.fuses).toEqual([true, true, true]);
+      at(a, zone.world.exit);
+      at(b, zone.world.exit);
+      const scrapBefore = countItem(b.bag, 'scrap');
+      expect(stepWorld(state, 'use', auth(a), T0 + 400)).toEqual({ mission: 'done', rewarded: 2 });
+      expect(state.balance).toBe(MISSION_REWARD.coins);
+      expect(countItem(b.bag, 'scrap')).toBe(scrapBefore + MISSION_REWARD.items.scrap);
+      expect(zone.enemy.dead).toBe(true);
+      // A entidade não volta mais.
+      tickWorld(state, T0 + 400 + 120_000);
+      expect(zone.enemy.dead).toBe(true);
+      expect(viewFor(state, a.id, T0 + 500).buildings[0]).toMatchObject({ id: 'b0', done: true });
+      expect(() => stepWorld(state, 'use', auth(a), T0 + 600)).toThrow('já foi religada');
+    });
+
+    it(`a área do chefão abre só depois da ${BOSS_UNLOCK_NIGHT}ª noite e lá dentro não tem volta`, () => {
+      const { state, a } = setup();
+      expect(() => enter(state, a, 'b2', T0 + 100)).toThrow('Trancada');
+      let t = T0;
+      for (let n = 1; n <= BOSS_UNLOCK_NIGHT; n++) {
+        state.clock.endsAt = t;
+        tickWorld(state, t); // anoitece
+        state.generator.fuel = 100;
+        state.clock.endsAt = t + 1;
+        tickWorld(state, t + 1); // amanhece
+        t += 2;
+        expect(state.bossUnlocked).toBe(n >= BOSS_UNLOCK_NIGHT);
+      }
+      expect(enter(state, a, 'b2', t).zone).toBe('b2');
+      at(a, INSIDE_EXIT);
+      expect(() => stepWorld(state, 'use', auth(a), t + 1)).toThrow('Não tem volta');
+    });
+
+    it('derrotar o chefão vence a expedição e todos levam a mochila', () => {
+      const { state, a, b } = setup();
+      state.bossUnlocked = true;
+      enter(state, a, 'b2', T0 + 100);
+      const boss = state.zones.b2.enemy;
+      expect(boss.hp).toBe(BOSS.hp);
+      // Quase morto e queimando: a última queimadura derruba o chefão.
+      Object.assign(boss, { hp: 0.01, burnUntil: T0 + 5000 });
+      tickWorld(state, T0 + 200);
+      expect(state.status).toBe('won');
+      expect(state.pendingExtract[a.id]).toEqual({ almond: 2 });
+      expect(state.pendingExtract[b.id]).toEqual({ almond: 2 });
+      expect([a.left, b.left]).toEqual([true, true]);
+      expect(viewFor(state, a.id, T0 + 300).me.prize).toEqual({ almond: 2 });
     });
   });
 });

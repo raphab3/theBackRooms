@@ -2,17 +2,22 @@
 // Cada jogador está numa zona ('camp' ou o id de uma edificação) e só interage com ela.
 import { almondSaveChance, damageMultiplier } from '@backrooms/shared/arms.js';
 import {
+  BOSS,
+  BOSS_UNLOCK_NIGHT,
   CARTOGRAPHER,
   CAMP_SIZE,
   CAMP_SPAWN,
   DAY_MS,
+  ENEMY_SPEED,
   ENTER_GRACE_MS,
+  FUSE_REACH,
   FUEL_DRAIN,
   FUEL_MAX,
   GENERATOR_CENTER,
   GENERATOR_HP,
   GENERATOR_OFF_FAIL_MS,
   MAP_PRICE,
+  MISSION_REWARD,
   MONSTERS,
   NIGHT_MS,
   REFUEL_REACH,
@@ -67,7 +72,12 @@ function createExpedition({ code, seed, players, lobbyKey = null, now }) {
     const world = createWorld(buildingSeed(seed, i), b.level);
     zones[b.id] = {
       world,
-      enemy: { ...world.enemy, hp: ENEMY_HP, dead: false },
+      boss: !!b.boss,
+      enemy: b.boss
+        ? { ...world.exit, hp: BOSS.hp, maxHp: BOSS.hp, speed: BOSS.speed, dead: false }
+        : { ...world.enemy, hp: ENEMY_HP, maxHp: ENEMY_HP, speed: ENEMY_SPEED, dead: false },
+      // Fusíveis pegos (por índice) e se o painel já foi religado. O chefão não tem missão.
+      mission: b.boss ? null : { fuses: world.fuses.map(() => false), done: false },
       loot: createLoot(world, (seed + i * 104729) >>> 0),
       collectedCoins: [],
       busySince: 0,
@@ -84,6 +94,9 @@ function createExpedition({ code, seed, players, lobbyKey = null, now }) {
     zones,
     campLoot: { bags: [], cores: [], drops: [] },
     clock: { phase: 'day', night: 0, endsAt: now + DAY_MS },
+    bossUnlocked: false,
+    // Mochilas de quem venceu o chefão, à espera do Durable Object creditar no estoque.
+    pendingExtract: null,
     generator: { fuel: FUEL_MAX, hp: GENERATOR_HP, offSince: 0 },
     monsters: [],
     spawnQueue: [],
@@ -160,7 +173,24 @@ function damageEnemy(state, zone, amount, now) {
       path: [],
     });
     state.zones[zone].loot.cores.push({ id: crypto.randomUUID(), x: enemy.x, y: enemy.y });
+    if (state.zones[zone].boss) win(state, now);
   }
+}
+
+// Chefão derrotado: a expedição é vencida e todo mundo que ainda está nela leva a mochila.
+function win(state, now) {
+  if (state.status !== 'playing') return;
+  state.status = 'won';
+  state.wonAt = now;
+  const extracted = {};
+  for (const p of state.players) {
+    if (p.left) continue;
+    addTotals((extracted[p.id] ??= {}), p.bag);
+    for (const bag of p.carrying) addTotals((extracted[bag.owner] ??= {}), bag.items);
+    Object.assign(p, { left: true, bag: [], carrying: [] });
+  }
+  state.pendingExtract = extracted;
+  state.prizes = extracted; // o que cada um levou, para a tela de vitória
 }
 
 /** Uma ação de um jogador. Devolve o que o autor precisa saber (além da visão atualizada). */
@@ -198,6 +228,8 @@ function stepWorld(state, action, body, now) {
 function use(state, p, now) {
   if (p.zone === 'camp') {
     const b = state.camp.buildings.find(v => distance(p, v.doorAt) <= USE_REACH);
+    if (b?.boss && !state.bossUnlocked)
+      throw new ApiError(`Trancada. Sobrevivam à ${BOSS_UNLOCK_NIGHT}ª noite para abrir.`, 409);
     if (b) {
       moveTo(p, b.id, INSIDE_EXIT, now);
       reveal(state, p);
@@ -211,13 +243,45 @@ function use(state, p, now) {
     }
     throw new ApiError('Chegue perto de uma porta ou do portal.');
   }
+  const zone = state.zones[p.zone];
   if (distance(p, INSIDE_EXIT) <= USE_REACH) {
+    if (zone.boss) throw new ApiError('Não tem volta: derrotem o chefão.', 409);
     const b = state.camp.buildings.find(v => v.id === p.zone);
     moveTo(p, 'camp', b.doorAt, now);
     reveal(state, p);
     return { zone: 'camp' };
   }
+  if (zone.mission && distance(p, zone.world.exit) <= USE_REACH) return religar(state, p, now);
   throw new ApiError('A saída é por onde você entrou.');
+}
+
+// Painel no fundo da edificação: com todos os fusíveis, a luz volta e a entidade apaga de vez.
+// Quem está lá dentro ganha a recompensa; a equipe ganha moedas.
+function religar(state, p, now) {
+  const zone = state.zones[p.zone],
+    mission = zone.mission;
+  if (mission.done) throw new ApiError('A luz daqui já foi religada.');
+  const missing = mission.fuses.filter(taken => !taken).length;
+  if (missing) throw new ApiError(`Faltam ${missing} fusível(is) para religar o painel.`, 409);
+  mission.done = true;
+  Object.assign(zone.enemy, { hp: 0, dead: true, respawnAt: Infinity, path: [], burnUntil: 0 });
+  state.balance += MISSION_REWARD.coins;
+  const rewarded = state.players.filter(v => !v.left && v.alive && v.zone === p.zone);
+  for (const v of rewarded)
+    for (const [item, qty] of Object.entries(MISSION_REWARD.items)) addItems(v.bag, item, qty);
+  const name = state.camp.buildings.find(b => b.id === p.zone).name;
+  state.messages = [
+    ...state.messages,
+    {
+      id: crypto.randomUUID(),
+      sender: 'system',
+      name: 'Missão',
+      color: '#3ad17a',
+      text: `${p.name} religou a luz de ${name}. +${MISSION_REWARD.coins} moedas para a equipe.`,
+      at: now,
+    },
+  ].slice(-50);
+  return { mission: 'done', rewarded: rewarded.length };
 }
 
 // Segurou E no portal: sai da expedição levando a mochila (e as resgatadas voltam aos donos).
@@ -399,6 +463,10 @@ function sync(state, p, body, now) {
         zone.collectedCoins.push(coin.id);
         state.balance++;
       }
+    zone.world.fuses.forEach((fuse, i) => {
+      if (zone.mission && !zone.mission.fuses[i] && distance(p, fuse) < FUSE_REACH)
+        zone.mission.fuses[i] = true;
+    });
     for (const bottle of loot.almonds)
       if (!bottle.taken && distance(p, bottle) < PICKUP_REACH && addItems(p.bag, 'almond', 1))
         bottle.taken = true;
@@ -441,7 +509,7 @@ function tickWorld(state, now) {
       hunted = state.players.filter(p => !p.left && p.alive && p.zone === id);
     if (!enemy.dead && (enemy.burnUntil || 0) > now)
       damageEnemy(state, id, FIRE.primary.burnDps * dt, now);
-    if (enemy.dead && now >= enemy.respawnAt) {
+    if (enemy.dead && !zone.boss && now >= enemy.respawnAt) {
       const far = c => Math.min(Infinity, ...hunted.map(p => distance(p, c))),
         cells = [zone.world.enemy, ...zone.world.coins],
         spot = cells.reduce((best, c) => (far(c) > far(best) ? c : best), cells[0]);
@@ -464,7 +532,7 @@ function tickWorld(state, now) {
       enemy.path = paths[0]?.slice(1) || [];
       enemy.pathAt = now;
     }
-    let remaining = dt * 0.9;
+    let remaining = dt * (enemy.speed || ENEMY_SPEED);
     while (remaining > 0 && enemy.path.length) {
       const [tx, ty] = enemy.path[0],
         dx = tx + 0.5 - enemy.x,
@@ -499,6 +567,20 @@ function tickClock(state, now) {
   } else {
     clock.phase = 'day';
     clock.endsAt = now + DAY_MS;
+    if (clock.night >= BOSS_UNLOCK_NIGHT && !state.bossUnlocked) {
+      state.bossUnlocked = true;
+      state.messages = [
+        ...state.messages,
+        {
+          id: crypto.randomUUID(),
+          sender: 'system',
+          name: 'Acampamento',
+          color: '#ff6b5a',
+          text: `Vocês sobreviveram à ${clock.night}ª noite. A Área do Chefão abriu.`,
+          at: now,
+        },
+      ].slice(-50);
+    }
     state.monsters = [];
     state.spawnQueue = [];
   }
@@ -637,6 +719,7 @@ function viewFor(state, playerId, now) {
       carrying: me.carrying.length,
       armLevel: me.armLevel || 1,
       leaving: me.leaving ? now - me.leaving : 0,
+      prize: state.status === 'won' ? state.prizes?.[me.id] || {} : null,
       left: me.left,
     },
     team: state.players.map(p => ({
@@ -663,10 +746,23 @@ function viewFor(state, playerId, now) {
       x: zone.enemy.x,
       y: zone.enemy.y,
       hp: zone.enemy.hp,
+      maxHp: zone.enemy.maxHp,
+      boss: zone.boss,
       dead: zone.enemy.dead,
       burning: (zone.enemy.burnUntil || 0) > now,
     },
     collectedCoins: zone ? zone.collectedCoins : [],
+    mission: zone?.mission || null,
+    bossUnlocked: state.bossUnlocked,
+    // No acampamento: o que cada porta mostra (missão feita, trancada).
+    buildings: Object.entries(state.zones).map(([id, z]) => ({
+      id,
+      done: !!z.mission?.done,
+      fuses: z.mission ? z.mission.fuses.filter(Boolean).length : 0,
+      need: z.mission ? z.mission.fuses.length : 0,
+      locked: z.boss && !state.bossUnlocked,
+      bossDown: z.boss && z.enemy.dead,
+    })),
     loot: {
       piles: (loot.piles || []).filter(v => !v.salvaged).map(({ id, x, y }) => ({ id, x, y })),
       almonds: (loot.almonds || []).filter(v => !v.taken).map(({ id, x, y }) => ({ id, x, y })),

@@ -68,6 +68,7 @@ class WorldDO {
       if (action === 'hello') ws.serializeAttachment({ id: body.id });
       ws.send(JSON.stringify({ type: 'result', reqId, ...result }));
       if (result.extracted) await this.credit(player, result.extracted);
+      await this.settle();
       this.broadcast(now);
       this.dirty = true;
     } catch (error) {
@@ -109,6 +110,42 @@ class WorldDO {
       );
   }
 
+  // Vitória (chefão derrotado): credita a mochila de todos. Gerador apagado ou chefão vencido:
+  // avisa o Posto Zero uma vez.
+  async settle() {
+    const state = this.state,
+      extract = state.pendingExtract;
+    if (extract) {
+      state.pendingExtract = null;
+      const byId = new Map(state.players.map(p => [p.id, p]));
+      for (const [ownerId, items] of Object.entries(extract)) {
+        const owner = byId.get(ownerId);
+        if (owner?.keyHash && this.env?.DB)
+          await creditPlayer(this.env.DB, {
+            id: `${state.code}:${ownerId}:won`,
+            code: state.code,
+            keyHash: owner.keyHash,
+            items,
+            startedAt: state.startedAt,
+          }).catch(error => console.error('Falha ao creditar estoque', error));
+      }
+      state.wonLoot = Object.values(extract).reduce((all, items) => {
+        for (const [item, qty] of Object.entries(items)) all[item] = (all[item] || 0) + qty;
+        return all;
+      }, {});
+    }
+    if ((state.status === 'failed' || state.status === 'won') && !state.failReported) {
+      state.failReported = true;
+      if (state.lobbyKey && this.env.LOBBIES)
+        await this.env.LOBBIES.get(this.env.LOBBIES.idFromName(state.lobbyKey))
+          .fetch('https://lobby.internal/result', {
+            method: 'POST',
+            body: JSON.stringify({ won: state.status === 'won', loot: state.wonLoot || {} }),
+          })
+          .catch(() => {});
+    }
+  }
+
   broadcast(now = Date.now()) {
     this.mapSent ??= new WeakMap();
     for (const ws of this.ctx.getWebSockets()) {
@@ -146,19 +183,7 @@ class WorldDO {
     const now = Date.now();
     tickWorld(this.state, now);
     this.broadcast(now);
-    // Gerador apagou de vez: avisa o Posto Zero uma vez (expedição sem vitória nem recursos).
-    if (this.state.status === 'failed' && !this.state.failReported) {
-      this.state.failReported = true;
-      if (this.state.lobbyKey && this.env.LOBBIES)
-        this.ctx.waitUntil?.(
-          this.env.LOBBIES.get(this.env.LOBBIES.idFromName(this.state.lobbyKey))
-            .fetch('https://lobby.internal/result', {
-              method: 'POST',
-              body: JSON.stringify({ won: false, loot: {} }),
-            })
-            .catch(() => {}),
-        );
-    }
+    this.ctx.waitUntil?.(this.settle());
     if (now - (this.savedAt || 0) >= SAVE_MS) {
       this.savedAt = now;
       this.ctx.waitUntil?.(this.ctx.storage.put('state', this.state));

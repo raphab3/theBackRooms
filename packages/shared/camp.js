@@ -17,6 +17,8 @@ const FOOT = 5; // edificação = bloco 5×5 células
 export const BUILDINGS = [
   { id: 'b0', level: 'backrooms', name: 'Nível 0 · Backrooms', x: 22, y: 6, door: 'south' },
   { id: 'b1', level: 'poolrooms', name: 'Poolrooms', x: 37, y: 22, door: 'west' },
+  // Área do chefão: trancada até a equipe sobreviver à 5ª noite; lá dentro não tem volta.
+  { id: 'b2', level: 'glitch', name: 'Área do Chefão', x: 6, y: 22, door: 'east', boss: true },
 ];
 
 /** Semente do interior de cada edificação (o cliente gera o mesmo labirinto que o servidor). */
@@ -96,3 +98,11 @@ export const safeRadius = (fuel, on) => (on ? 3 + (6 * fuel) / FUEL_MAX : 0);
 // --- Etapa 3: mini mapa ---
 export const MAP_PRICE = 15; // moedas da equipe
 export const REVEAL_RADIUS = { camp: 6, building: 3 }; // células reveladas em volta de quem anda
+
+// --- Etapa 4: missões das edificações e o chefão ---
+// Missão: juntar os fusíveis (da equipe) e religar o painel no fundo. A entidade apaga de vez.
+export const MISSION_REWARD = { coins: 20, items: { scrap: 6, core_fire: 1 } }; // por quem está lá
+export const BOSS_UNLOCK_NIGHT = 5; // sobreviver a esta noite destrava a área do chefão
+export const BOSS = { name: 'O Zelador', hp: 600, speed: 1.3 };
+export const ENEMY_SPEED = 0.9; // entidade comum, células/s
+export const FUSE_REACH = 0.55;

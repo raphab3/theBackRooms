@@ -240,8 +240,10 @@ export function buildLevel(root, world, scene) {
         f.rotation.y = t * 1.5;
         f.position.y = 1 + Math.sin(t * 2) * 0.08;
       }
+      // Painel da missão: moldura verde com todos os fusíveis; some na área do chefão.
       const ready = room.fuses.every(Boolean);
-      frameMaterial.color.set(ready ? 0x3ad17a : 0x7a2a1a);
+      frameMaterial.color.set(room.done ? 0xfff2b0 : ready ? 0x3ad17a : 0x7a2a1a);
+      exit.visible = room.panel !== false;
       const hidden = new Set(room.collectedCoins);
       // Objetos reaproveitados: criar 3 por moeda a cada quadro gerava lixo e travadas de GC.
       world.coins.forEach((c, i) => {
@@ -253,8 +255,10 @@ export function buildLevel(root, world, scene) {
       // Entidade: some ao morrer; queimando, brilha em laranja; vida na barra.
       const foe = room.enemy;
       enemy.visible = !foe.dead;
-      hpBar.hidden = foe.dead || foe.hp >= ENEMY_HP;
-      hpFill.style.width = `${(100 * foe.hp) / ENEMY_HP}%`;
+      enemy.scale.setScalar(foe.boss ? 1.6 : 1); // o chefão é bem maior
+      const maxHp = foe.maxHp || ENEMY_HP;
+      hpBar.hidden = foe.dead || foe.hp >= maxHp;
+      hpFill.style.width = `${(100 * foe.hp) / maxHp}%`;
       shadow.emissive.setRGB(
         foe.burning ? 0.6 + Math.sin(t * 30) * 0.3 : 0,
         foe.burning ? 0.2 : 0,
