@@ -32,7 +32,6 @@ let net = null,
   requestId = 0,
   sceneRound = -1;
 function showPanel(which) {
-  $('adminPanel').hidden = !isAdmin();
   document.body.classList.toggle(
     'game-menu',
     which === 'pause' || which === 'missions' || which === 'leaderboard',
@@ -91,9 +90,6 @@ async function requestRoom(action, payload, path = '/api/rooms/') {
   } finally {
     clearTimeout(timer);
   }
-}
-function isAdmin() {
-  return $('nickname').value.trim().toLowerCase() === 'lucca416453416453admin';
 }
 function nameInput() {
   let name = $('nickname').value.trim();
@@ -561,7 +557,6 @@ function setupNet() {
 
 export {
   applySnapshot,
-  isAdmin,
   leaveRoom,
   nameInput,
   net,

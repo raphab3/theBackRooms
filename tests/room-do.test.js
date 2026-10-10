@@ -1,6 +1,6 @@
 import { SELF, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createWorld } from '../packages/shared/world.js';
+import { createWorld } from '@backrooms/shared/world.js';
 
 const migrations = import.meta.glob('../drizzle/*.sql', {
   query: '?raw',

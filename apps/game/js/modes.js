@@ -1,7 +1,7 @@
 // Seleção de modo (Normal/Hardcore) e de fase.
 import { $ } from './dom.js';
 import { reset } from './engine.js';
-import { applySnapshot, isAdmin, net, roomAction, roomPayload, showLobby } from './net.js';
+import { applySnapshot, net, roomAction, roomPayload, showLobby } from './net.js';
 import { game } from './state.js';
 
 let selectedMode = 'normal',
@@ -12,7 +12,7 @@ function updateModeUI() {
   const hard = game.activeMode === 'hardcore';
   $('modeBadge').hidden = !hard;
   document.body.classList.toggle('hardcore-mode', hard);
-  $('coinHud').hidden = hard && !isAdmin();
+  $('coinHud').hidden = hard;
   $('keyboardHints').textContent =
     'WASD MOVER · MOUSE OLHAR · SHIFT CORRER · F LANTERNA' + (hard ? '' : ' · V REVIVER (25)');
   $('padHints').textContent =

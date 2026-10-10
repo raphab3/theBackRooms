@@ -1,6 +1,6 @@
-import { PHASE_ORDER, createWorld } from '../packages/shared/world.js';
+import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
-import { adminName, authorize, colors, nameOf, newPlayer } from './players.js';
+import { authorize, colors, nameOf, newPlayer } from './players.js';
 import {
   ACTIVE_MS,
   MAX_PLAYERS,
@@ -12,17 +12,7 @@ import {
   validatedMode,
 } from './rooms.js';
 
-const ROOM_ACTIONS = [
-  'join',
-  'sync',
-  'start',
-  'leave',
-  'revive',
-  'level',
-  'mode',
-  'chat',
-  'admin-level',
-];
+const ROOM_ACTIONS = ['join', 'sync', 'start', 'leave', 'revive', 'level', 'mode', 'chat'];
 
 function join(room, body, now) {
   const p = newPlayer(nameOf(body), now);
@@ -77,25 +67,14 @@ function playerAction(room, action, body, now) {
     ['start', 'mode'].includes(action)
   )
     throw new ApiError('Aguarde a passagem para a próxima fase.', 409);
-  if (action === 'admin-level') {
-    if (!adminName(p.name)) throw new ApiError('Painel exclusivo do admin.', 403);
-    const level = body.level === 'lurking' ? 'lurking' : validatedLevel(body.level);
-    room.adminUsed = true;
-    room.campaign = false;
-    beginPhase(room, now, level);
-    return {};
-  }
   if (action === 'revive') {
-    if (room.mode === 'hardcore' && !adminName(p.name))
-      throw new ApiError('No Hardcore não é possível reviver.', 409);
+    if (room.mode === 'hardcore') throw new ApiError('No Hardcore não é possível reviver.', 409);
     if (!['playing', 'lost'].includes(room.status))
       throw new ApiError('A expedição precisa estar em andamento.', 409);
     const captured = room.players.filter(v => !v.alive && now - v.seen < ACTIVE_MS);
     if (!captured.length) throw new ApiError('Todos os exploradores já estão vivos.', 409);
-    if (!adminName(p.name) && room.balance < 25)
-      throw new ApiError('A equipe precisa de 25 moedas para reviver.', 409);
-    if (adminName(p.name)) room.adminUsed = true;
-    else room.balance -= 25;
+    if (room.balance < 25) throw new ApiError('A equipe precisa de 25 moedas para reviver.', 409);
+    room.balance -= 25;
     room.status = 'playing';
     room.lastTick = now;
     for (const v of captured) {

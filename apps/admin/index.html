@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Backrooms · Admin</title>
+    <style>
+      body {
+        font: 14px monospace;
+        background: #181e17;
+        color: #fff0bb;
+        margin: 0;
+        padding: 16px;
+      }
+      section {
+        border: 1px solid #ddbb55;
+        padding: 12px;
+        margin-bottom: 16px;
+        max-width: 760px;
+      }
+      h2 {
+        margin: 0 0 8px;
+        color: #f5d975;
+        font-size: 16px;
+      }
+      li {
+        margin: 4px 0;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        background: #30382a;
+        color: #fff0bb;
+        border: 1px solid #bca452;
+        padding: 4px 8px;
+      }
+      #status {
+        color: #f5d975;
+        min-height: 1.4em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>BACKROOMS · ADMIN</h1>
+    <p id="status" role="status"></p>
+    <section>
+      <h2>Salas ativas</h2>
+      <button id="reloadRooms" type="button">Atualizar</button>
+      <ul id="rooms"></ul>
+      <label
+        >Fase
+        <select id="level"></select
+      ></label>
+      <small>Clique em "Ir para a fase" numa sala. A sala fica fora do ranking.</small>
+    </section>
+    <section>
+      <h2>Chat</h2>
+      <label>Sala (opcional) <input id="chatRoom" maxlength="6" /></label>
+      <button id="reloadChat" type="button">Carregar</button>
+      <ul id="chat"></ul>
+    </section>
+    <section>
+      <h2>Mapas do construtor</h2>
+      <button id="reloadMaps" type="button">Carregar</button>
+      <ul id="maps"></ul>
+    </section>
+    <section>
+      <h2>Moedas de uma conta</h2>
+      <input id="coinName" placeholder="Nome" maxlength="32" />
+      <input id="coinValue" type="number" min="0" placeholder="Moedas" />
+      <button id="setCoins" type="button">Definir</button>
+    </section>
+    <script type="module" src="admin.js"></script>
+  </body>
+</html>

@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
-  { ignores: ['**/dist/', 'node_modules/', 'data/', '.wrangler/'] },
+  { ignores: ['**/dist/', 'node_modules/', 'data/', '.wrangler/', 'apps/game/public/admin/'] },
   js.configs.recommended,
   {
     rules: {

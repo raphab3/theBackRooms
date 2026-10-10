@@ -1,5 +1,5 @@
 import { ApiError, json } from './http.js';
-import { TTL, safeRoom, tickRoom } from './rooms.js';
+import { TTL, beginPhase, safeRoom, tickRoom } from './rooms.js';
 import { ROOM_ACTIONS, stepRoom } from './room-actions.js';
 
 const TICK_MS = 50, // 20 Hz
@@ -31,6 +31,10 @@ class RoomDO {
       if (request.headers.get('Upgrade') === 'websocket') return this.upgrade();
       if (path === '/init') return json(this.init(await request.json()));
       if (path === '/state') return json({ room: this.live() });
+      if (path === '/admin') {
+        const { action, body } = await request.json();
+        return json(this.admin(action, body));
+      }
       if (path === '/action') {
         const { action, body } = await request.json();
         return json(this.run(action, body));
@@ -87,6 +91,25 @@ class RoomDO {
     const view = { ...safeRoom(room, now), revision: room.revision };
     if (action !== 'sync') this.broadcast(view);
     return { ...extra, room: view };
+  }
+
+  // Ações do painel admin (o Worker já validou o Cloudflare Access).
+  admin(action, body) {
+    const room = this.live(),
+      now = Date.now();
+    if (action === 'level') {
+      room.adminUsed = true;
+      room.campaign = false;
+      beginPhase(room, now, body.level);
+    } else if (action === 'chat-delete')
+      room.messages = (room.messages || []).filter(m => m.id !== body.id);
+    else throw new ApiError('Ação não encontrada.', 404);
+    room.revision = (room.revision || 0) + 1;
+    room.updatedAt = now;
+    this.persist();
+    const view = { ...safeRoom(room, now), revision: room.revision };
+    this.broadcast(view);
+    return { room: view };
   }
 
   persist() {

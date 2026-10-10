@@ -1,4 +1,5 @@
 import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
+import { adminApi, requireAccess } from './admin.js';
 import { globalChat } from './chat.js';
 import { ApiError, dbFor, json } from './http.js';
 import { globalLeaderboard } from './leaderboard.js';
@@ -43,6 +44,8 @@ async function api(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && /^\/api\/rooms\/[A-Za-z2-9]{6}\/ws$/.test(url.pathname))
       return await roomSocket(request, env, url);
+    const admin = url.pathname.startsWith('/api/admin/');
+    if (admin) await requireAccess(request, env);
     if (request.method !== 'POST') throw new ApiError('Método não permitido.', 405);
     const maxBody = url.pathname.startsWith('/api/maps/') ? 65536 : 4096;
     const origin = request.headers.get('Origin');
@@ -60,6 +63,21 @@ async function api(request, env) {
     if (!body || typeof body !== 'object') throw new ApiError('Pedido inválido.');
     const db = dbFor(env),
       action = url.pathname.split('/').pop();
+    if (admin)
+      return json(
+        await adminApi(db, action, body, {
+          state: code => roomState(env, code),
+          admin: async (code, adminAction, payload) => {
+            const response = await roomRequest(env, code, '/admin', {
+              action: adminAction,
+              body: payload,
+            });
+            const data = await response.json();
+            if (!response.ok) throw new ApiError(data.error, response.status);
+            return data;
+          },
+        }),
+      );
     if (url.pathname.startsWith('/api/maps/')) return json(await customMapsApi(db, action, body));
     if (url.pathname.startsWith('/api/profiles/'))
       return json(await explorerProfile(db, action, body));
@@ -102,8 +120,15 @@ async function api(request, env) {
           enemy: { ...world.enemy },
         };
         const response = await roomRequest(env, code, '/init', { room });
-        if (response.ok)
+        if (response.ok) {
+          await db
+            .prepare(
+              "INSERT INTO rooms(code,state,updated_at) VALUES(?,'{}',?) ON CONFLICT(code) DO UPDATE SET updated_at=excluded.updated_at",
+            )
+            .bind(code, now)
+            .run();
           return json({ id: p.id, token: p.token, room: (await response.json()).room });
+        }
         if (response.status !== 409) return response;
       }
       throw new ApiError('Não foi possível criar a sala. Tente novamente.', 503);
