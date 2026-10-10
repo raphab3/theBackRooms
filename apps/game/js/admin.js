@@ -5,7 +5,7 @@ import { lock, reset } from './engine.js';
 import { enterLandscape } from './fullscreen.js';
 import { LEVEL_INFO } from './levels.js';
 import { selectedMode } from './modes.js';
-import { applySnapshot, isAdmin, net, requestRoom, roomPayload, showPanel } from './net.js';
+import { applySnapshot, isAdmin, net, roomAction, roomPayload, showPanel } from './net.js';
 import { game } from './state.js';
 
 function setupAdmin() {
@@ -25,7 +25,7 @@ function setupAdmin() {
     try {
       if (net) {
         const session = net;
-        const data = await requestRoom('admin-level', { ...roomPayload(), level });
+        const data = await roomAction('admin-level', { ...roomPayload(), level });
         if (net !== session) return;
         applySnapshot(data);
       } else {

@@ -200,8 +200,25 @@ async function bundleClient(file = 'main.js', seen = new Set(), out = []) {
   return out;
 }
 const gameSource = (await bundleClient()).join('\n');
+const roomSockets = {};
+async function serve(action, code, body) {
+  const r = await api(
+    new Request('https://game.test/api/rooms/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://game.test' },
+      body: JSON.stringify({ ...body, code }),
+    }),
+    { DB, ROOMS },
+  );
+  return { status: r.status, data: await r.json() };
+}
+function broadcast(code, room) {
+  for (const ws of roomSockets[code] ?? []) ws.deliver({ type: 'room', room });
+}
 function client() {
   let elements = {};
+  const sockets = [],
+    pending = [];
   let painting = new Proxy(
     { createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) },
     { get: (o, k) => o[k] || (() => {}) },
@@ -254,8 +271,60 @@ function client() {
       return 1;
     },
     clearTimeout() {},
+    setInterval() {
+      return 1;
+    },
+    clearInterval() {},
+    WebSocket: class {
+      constructor(url) {
+        this.url = url;
+        this.code = url.split('/')[5];
+        this.readyState = 1;
+        this.sent = [];
+        sockets.push(this);
+        (roomSockets[this.code] ??= new Set()).add(this);
+        // Como o RoomDO ao aceitar o upgrade: manda a sala inteira para quem acabou de conectar.
+        pending.push(
+          this.reply(() => serve('sync', this.code, who())).then(r => this.deliverRoom(r)),
+        );
+      }
+      deliver(message) {
+        if (this.readyState === 1) this.onmessage?.({ data: JSON.stringify(message) });
+      }
+      deliverRoom(reply) {
+        if (reply.status === 200) this.deliver({ type: 'room', room: reply.data.room });
+      }
+      // O WebSocket entrega em ordem: as respostas do servidor falso também.
+      reply(task) {
+        return (this.chain = (this.chain ?? Promise.resolve()).then(task));
+      }
+      // Faz o papel do RoomDO: {action, reqId, ...corpo} roda a ação na sala; toda ação exceto `sync`
+      // empurra a sala para todos os conectados e só então responde `result` ao autor.
+      send(text) {
+        const { action, reqId = null, ...body } = JSON.parse(text);
+        this.sent.push({ action, reqId, ...body });
+        pending.push(
+          this.reply(async () => {
+            const reply = await serve(action, this.code, body);
+            if (reply.status !== 200)
+              return this.deliver({
+                type: 'error',
+                reqId,
+                error: reply.data.error,
+                status: reply.status,
+              });
+            if (action !== 'sync') broadcast(this.code, reply.data.room);
+            this.deliver({ type: 'result', reqId, ...reply.data });
+          }),
+        );
+      }
+      close() {
+        this.readyState = 3;
+        roomSockets[this.code]?.delete(this);
+      }
+    },
     matchMedia: () => ({ matches: true }),
-    location: { origin: 'https://game.test', search: '' },
+    location: { origin: 'https://game.test', search: '', protocol: 'https:', host: 'game.test' },
     navigator: {},
     window: { addEventListener() {} },
     document: {
@@ -265,13 +334,38 @@ function client() {
       addEventListener() {},
       body: element('body'),
     },
-    fetch: (url, init) => api(new Request('https://game.test' + url, init), { DB, ROOMS }),
+    // Entrar na sala é REST, mas o RoomDO empurra a sala nova para quem já está conectado.
+    fetch: async (url, init) => {
+      const response = await api(new Request('https://game.test' + url, init), { DB, ROOMS });
+      if (url === '/api/rooms/join' && response.ok) {
+        const { room } = await response.clone().json();
+        broadcast(room.code, room);
+      }
+      return response;
+    },
   };
   vm.createContext(sandbox);
   vm.runInContext(worldSource + '\n' + gameSource, sandbox);
   // `with (game)` deixa os testes lerem e escreverem o estado compartilhado (state.js) pelo
   // nome direto, como `state='playing'`, igual a quando tudo era um arquivo só.
-  return { sandbox, elements, run: s => vm.runInContext(`with (game) {\n${s}\n}`, sandbox) };
+  // Quem `await`a uma chamada assíncrona do cliente também espera as respostas do servidor falso.
+  function run(s) {
+    const result = vm.runInContext(`with (game) {\n${s}\n}`, sandbox);
+    return typeof result?.then === 'function'
+      ? result.then(async value => (await Promise.all(pending.splice(0)), value))
+      : result;
+  }
+  function who() {
+    return run('({id:net.id,token:net.token,round:net.room.round})');
+  }
+  // Equivale a um tick do servidor: a sala atual chega por todos os sockets conectados.
+  async function pull() {
+    const ws = sockets.at(-1),
+      reply = await serve('sync', ws.code, who());
+    broadcast(ws.code, reply.data.room);
+    await Promise.all(pending.splice(0));
+  }
+  return { sandbox, elements, sockets, run, pull };
 }
 const joystickClient = client();
 joystickClient.run("state='playing'");
@@ -343,10 +437,10 @@ assert.equal(a.run('state'), 'lobby');
 b.run("document.getElementById('nickname').value='Mobile'");
 b.sandbox.document.getElementById('roomCode').value = sharedCode;
 await b.run("connectRoom('join')");
-await a.run('syncRoom()');
+await a.pull();
 assert.equal(a.run('net.room.players.length'), 2);
 await a.run('launchRoom()');
-await b.run('syncRoom()');
+await b.pull();
 assert.equal(a.run('state'), 'playing');
 assert.equal(b.run('state'), 'playing');
 assert.equal(a.run('sceneRound'), b.run('sceneRound'));
@@ -356,7 +450,7 @@ assert.equal(a.run('state'), 'paused');
 a.run('resumeOnline()');
 assert.equal(a.run('state'), 'playing');
 await a.run('leaveRoom()');
-await b.run('syncRoom()');
+await b.pull();
 assert.equal(b.run('net.room.host'), b.run('net.id'));
 await b.run('leaveRoom()');
 assert.equal(b.run('net'), null);
@@ -613,9 +707,9 @@ await ca.run("connectRoom('create')");
 cb.run("document.getElementById('nickname').value='B'");
 cb.sandbox.document.getElementById('roomCode').value = ca.run('net.code');
 await cb.run("connectRoom('join')");
-await ca.run('syncRoom()');
+await ca.pull();
 await ca.run('launchRoom()');
-await cb.run('syncRoom()');
+await cb.pull();
 modifyRoom(ca.run('net.code'), r => {
   r.balance = 25;
   r.collectedCoins = [0, 1, 2];
@@ -623,12 +717,12 @@ modifyRoom(ca.run('net.code'), r => {
   r.status = 'lost';
   r.players.forEach(p => (p.alive = false));
 });
-await ca.run('syncRoom()');
-await cb.run('syncRoom()');
+await ca.pull();
+await cb.pull();
 assert.equal(ca.run('state'), 'lost');
 assert.equal(cb.run('state'), 'lost');
 await ca.run('reviveAll()');
-await cb.run('syncRoom()');
+await cb.pull();
 assert.equal(ca.run('state'), 'playing');
 assert.equal(cb.run('state'), 'playing');
 assert.equal(cb.run('coinBalance'), 0);
@@ -792,7 +886,7 @@ await la.run("connectRoom('create')");
 lb.sandbox.document.getElementById('roomCode').value = la.run('net.code');
 await lb.run("connectRoom('join')");
 await la.run('launchRoom()');
-await lb.run('syncRoom()');
+await lb.pull();
 assert.equal(la.run('activeLevel'), 'backrooms');
 const phaseOrder = PHASE_ORDER;
 const campaignNow = Date.now;
@@ -802,19 +896,23 @@ try {
   for (let i = 0; i < phaseOrder.length; i++) {
     assert.equal(la.run('activeLevel'), phaseOrder[i]);
     assert.equal(lb.run('activeLevel'), phaseOrder[i]);
-    await call('level', la.run('roomPayload()'), 409);
+    await call(
+      'level',
+      la.run('({code:net.code,id:net.id,token:net.token,round:net.room.round})'),
+      409,
+    );
     modifyRoom(la.run('net.code'), r => {
       r.status = 'won';
       r.fuses = r.world.fuses.map(() => true);
       r.started = campaignClock - 14000;
       r.finished = campaignClock;
     });
-    await la.run('syncRoom()');
-    await lb.run('syncRoom()');
+    await la.pull();
+    await lb.pull();
     assert.equal(la.run('state'), 'won');
     campaignClock += 3001;
-    await la.run('syncRoom()');
-    await lb.run('syncRoom()');
+    await la.pull();
+    await lb.pull();
     if (i + 1 < phaseOrder.length) {
       assert.equal(la.run('activeLevel'), phaseOrder[i + 1]);
       assert.equal(lb.run('activeLevel'), phaseOrder[i + 1]);
@@ -826,7 +924,7 @@ try {
     } else {
       assert.equal(la.run('state'), 'won');
       const score = await rankCall('submit', {
-        ...la.run('roomPayload()'),
+        ...la.run('({code:net.code,id:net.id,token:net.token,round:net.room.round})'),
         name: 'Fake',
         milliseconds: 1,
         level: 'run',
@@ -837,7 +935,7 @@ try {
     campaignClock += 14000;
   }
   await la.run('launchRoom()');
-  await lb.run('syncRoom()');
+  await lb.pull();
   assert.equal(la.run('activeLevel'), 'backrooms');
   assert.equal(lb.run('activeLevel'), 'backrooms');
 } finally {
@@ -992,11 +1090,11 @@ await hca.run("connectRoom('create')");
 hcb.sandbox.document.getElementById('roomCode').value = hca.run('net.code');
 await hcb.run("connectRoom('join')");
 await hca.run("selectMode('hardcore','lobby')");
-await hcb.run('syncRoom()');
+await hcb.pull();
 assert.equal(hcb.run('activeMode'), 'hardcore');
 assert.equal(hcb.run('coins.length'), 0);
 await hca.run('launchRoom()');
-await hcb.run('syncRoom()');
+await hcb.pull();
 assert.ok(hcb.run("smile.type==='smile'"));
 hcb.run('elapsed=23;render(100)');
 console.log(
@@ -1130,26 +1228,99 @@ const staleLife = await call(
 assert.equal(staleLife.positionAccepted, false);
 assert.equal(staleLife.movementReason, 'respawn');
 assert.equal(staleLife.room.players[0].x, 1.5);
-const jitterPage = client();
-jitterPage.run("document.getElementById('nickname').value='Cliente'");
-await jitterPage.run("connectRoom('create')");
-await jitterPage.run('launchRoom()');
-jitterPage.run(
-  "player.x+=.2;recordMovement();const snapshot=JSON.parse(JSON.stringify(net.room));applySnapshot({room:{...snapshot,revision:snapshot.revision+1},positionAccepted:false,movementReason:'speed',ackMovement:0})",
-);
-assert.equal(jitterPage.run('player.x'), 1.7);
-assert.equal(jitterPage.run('movementWaiting'), true);
-assert.equal(jitterPage.run('movementTrail.length'), 1);
-assert.ok(jitterPage.run('JSON.stringify(roomPayload()).length<4096'));
-console.log(
-  'PASS: legal corner breadcrumbs accepted, through-wall jumps rejected, duplicate acknowledgement safe, latency budget retries, stale-life packets rejected, client no longer snaps back on jitter.',
-);
-// Twenty seconds at 144 Hz builds a multi-packet backlog despite eased reversals.
+// Cliente WebSocket: sala empurrada pelo servidor, predição local, correção só acima de 0,5 célula,
+// sync a 30 Hz sem trilhas, interpolação, reconexão e ações que esperam a resposta do servidor.
+const live = client();
+live.run("document.getElementById('nickname').value='Cliente'");
+await live.run("connectRoom('create')");
+assert.equal(live.run('net.joined'), true);
+await live.run('launchRoom()');
+assert.equal(live.run('state'), 'playing');
+// Entrega ao cliente uma sala empurrada pelo servidor, alterada por `change` (código de uma função).
+const pushRoom = (c, change) =>
+  c.run(
+    `handleServerMessage(JSON.stringify({type:'room',room:(${change})({...net.room,players:net.room.players.map(p=>({...p})),revision:net.room.revision+1})}))`,
+  );
+const serverAt = (x, y) =>
+  `room => { room.players[0].x = ${x}; room.players[0].y = ${y}; return room; }`;
+live.run('player.x=1.7;player.y=1.5;recordPrediction()');
+// O servidor ainda vê o jogador onde ele estava 100 ms atrás: não é divergência.
+pushRoom(live, `${serverAt(1.5, 1.5)}`);
+assert.equal(live.run('player.x'), 1.7);
+// Servidor muito longe de qualquer posição recente: corrige.
+const far = live.run('net.room.players[0]');
+pushRoom(live, `${serverAt(far.x + 3, far.y)}`);
+assert.equal(live.run('player.x'), far.x + 3);
+live.run('recordPrediction()');
+// A 30 Hz o cliente manda a posição em `sync` com seq crescente, sem trilhas; parado, só um batimento por segundo.
+const wsLive = live.sockets.at(-1);
+live.run('player.x=2.5;sendInput()');
+live.run('player.x=2.6;sendInput()');
+const syncs = wsLive.sent.filter(m => m.action === 'sync').slice(-2);
+assert.equal(syncs.length, 2);
+assert.deepEqual([syncs[0].x, syncs[1].x], [2.5, 2.6]);
+assert.ok(syncs[1].seq > syncs[0].seq);
+assert.equal(syncs[0].round, live.run('net.room.round'));
+assert.ok(!JSON.stringify(wsLive.sent).includes('trail'));
+live.run("state='paused'");
+const beforeBeat = wsLive.sent.length;
+live.run('lastBeat=performance.now();sendInput()');
+assert.equal(wsLive.sent.length, beforeBeat);
+live.run("state='playing'");
+// A ação só conta depois que o servidor aceita: reviver sem moedas na sala (saldo local defasado) é recusado.
+const refused = client();
+refused.run("document.getElementById('nickname').value='SemMoedas'");
+await refused.run("connectRoom('create')");
+await refused.run('launchRoom()');
+modifyRoom(refused.run('net.code'), r => {
+  r.players[0].alive = false;
+  r.status = 'lost';
+});
+await refused.pull();
+assert.equal(refused.run('state'), 'lost');
+refused.run('coinBalance=25');
+await refused.run('reviveAll()');
+assert.equal(refused.run("missionValue('rescues')"), 0);
+assert.equal(refused.run('$("rescueMessage").textContent').includes('Equipe revivida'), false);
+assert.equal(refused.run('state'), 'lost');
+// Transições chegam por empurrão do servidor, sem o cliente perguntar: entrada de jogador, início e fases.
+const hostWs = client(),
+  guestWs = client();
+hostWs.run("document.getElementById('nickname').value='Anfitrião'");
+guestWs.run("document.getElementById('nickname').value='Convidado'");
+await hostWs.run("connectRoom('create')");
+guestWs.run(`document.getElementById('roomCode').value='${hostWs.run('net.code')}'`);
+await guestWs.run("connectRoom('join')");
+assert.equal(hostWs.run('net.room.players.length'), 2, 'broadcast da entrada');
+assert.equal(hostWs.run('remotePlayers.length'), 1);
+assert.equal(hostWs.run('state'), 'lobby');
+await hostWs.run('launchRoom()');
+assert.equal(hostWs.run('state'), 'playing');
+assert.equal(guestWs.run('net.room.status'), 'playing');
+assert.equal(guestWs.run('state'), 'playing', 'lobby→playing chega ao convidado');
+// Fase da campanha: depois da vitória o servidor avança o nível e o convidado recebe round e level novos.
+const phaseBefore = guestWs.run('net.room.round');
+modifyRoom(hostWs.run('net.code'), r => {
+  r.status = 'won';
+  r.finished = Date.now() - 4000;
+});
+await hostWs.pull();
+assert.equal(guestWs.run('net.room.level'), PHASE_ORDER[1]);
+assert.ok(guestWs.run('net.room.round') > phaseBefore);
+assert.equal(guestWs.run('activeLevel'), PHASE_ORDER[1]);
+assert.equal(guestWs.run('state'), 'playing');
+await hostWs.run('leaveRoom()');
+assert.equal(hostWs.run('net'), null);
+await guestWs.pull();
+assert.equal(guestWs.run('net.room.players.length'), 1, 'broadcast da saída');
+assert.equal(guestWs.run('remotePlayers.length'), 0);
+await guestWs.run('leaveRoom()');
+// A predição local não depende da rede: 20 s a 144 Hz batem com o movimento offline.
 const smooth = client();
 smooth.run("document.getElementById('nickname').value='Fluido'");
 await smooth.run("connectRoom('create')");
 await smooth.run('launchRoom()');
-smooth.run('player.a=grid[1][2]===0?0:Math.PI/2;movementWaiting=true');
+smooth.run('player.a=grid[1][2]===0?0:Math.PI/2');
 const offlineMotion = client();
 offlineMotion.run(
   `grid=${smooth.run('JSON.stringify(grid)')};player=${smooth.run('JSON.stringify(player)')};resetMotion()`,
@@ -1163,45 +1334,36 @@ for (let i = 0; i < 2880; i++) {
   const expected = offlineMotion.run('({x:player.x,y:player.y})');
   assert.ok(
     Math.hypot(after.x - expected.x, after.y - expected.y) < 1e-8,
-    'network waiting changed smooth local movement',
+    'online play changed smooth local movement',
   );
   assert.ok(
     Math.hypot(after.x - before.x, after.y - before.y) <= 1.85 / 144 + 1e-8,
     'walking exceeded speed limit',
   );
 }
-assert.ok(smooth.run('movementTrail.length>96'));
-const predicted = smooth.run('({x:player.x,y:player.y})');
-const packet = smooth.run('roomPayload()');
-assert.ok(packet.trail.length <= 96);
-assert.ok(JSON.stringify(packet).length < 4096);
-assert.equal(packet.x, packet.trail.at(-1)[1]);
-assert.equal(packet.y, packet.trail.at(-1)[2]);
-// Walking while this packet is in flight must not rewrite its acknowledgement.
-smooth.run('keys={KeyW:true};update(1/144)');
-const frozen = smooth.run(`movementTrail.find(p=>p[0]===${packet.trail.at(-1)[0]})`);
-assert.equal(frozen[1], packet.x);
-assert.equal(frozen[2], packet.y);
-let batches = 0;
-while (smooth.run('movementTrail.length')) {
-  modifyRoom(smooth.run('net.code'), r => {
-    r.players[0].moveCredit = 6;
-    r.players[0].moveClock = Date.now();
-  });
-  const before = smooth.run('({x:player.x,y:player.y})');
-  await smooth.run('syncRoom()');
-  assert.equal(smooth.run('movementWaiting'), false);
-  assert.equal(smooth.run('player.x'), before.x);
-  assert.equal(smooth.run('player.y'), before.y);
-  assert.ok(++batches < 50);
-}
-assert.ok(batches > 1);
-const settled = smooth.run('net.room.players.find(p=>p.id===net.id)');
-assert.ok(
-  Math.hypot(settled.x - smooth.run('player.x'), settled.y - smooth.run('player.y')) < 0.002,
-);
+// Queda de conexão: continua na sala, avisa na tela e volta com o mesmo token.
+const token = live.run('net.token');
+wsLive.close();
+wsLive.onclose();
+assert.equal(live.run('net.connected'), false);
+assert.notEqual(live.run('net'), null);
+assert.equal(live.run('$("connection").textContent'), 'RECONECTANDO…');
+live.run('openSocket()');
+await Promise.resolve();
+await live.pull();
+assert.equal(live.sockets.length, 2);
+assert.equal(live.run('net.token'), token);
+assert.equal(live.run('net.connected'), true);
+assert.equal(live.run('reconnectAttempt'), 0);
+// Erro de sessão do servidor tira o jogador da sala; erro comum só avisa.
+live.sockets.at(-1).deliver({ type: 'error', reqId: null, error: 'Devagar.', status: 429 });
+assert.notEqual(live.run('net'), null);
+live.sockets.at(-1).deliver({ type: 'error', reqId: null, error: 'Sessão expirada.', status: 401 });
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(live.run('net'), null);
 console.log(
-  'PASS: uninterrupted 144-Hz movement through twenty seconds of delayed multiplayer responses, bounded batches, immutable in-flight points, complete backlog drain without teleporting.',
+  'PASS: WebSocket client follows the RoomDO protocol: server pushes drive lobby→playing, joins/leaves and phases, predicts locally, corrects only past 0.5 cell, syncs at 30 Hz without trails and keeps the room across a dropped socket.',
 );
 
 // Missions track actual game events and survive reopening the tab.
@@ -1247,8 +1409,8 @@ modifyRoom(missionTeam.run('net.code'), r => {
   r.fuses = [true, true, true];
   r.balance = 50;
 });
-await missionTeam.run('syncRoom()');
-await missionTeam.run('syncRoom()');
+await missionTeam.pull();
+await missionTeam.pull();
 assert.equal(missionTeam.run("missionValue('wins')"), 1);
 assert.equal(missionTeam.run("missionValue('coopWins')"), 1);
 assert.equal(missionTeam.run("missionValue('coins')"), 50);
