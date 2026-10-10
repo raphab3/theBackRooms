@@ -1,0 +1,14 @@
+{
+  "name": "backrooms-local",
+  "version": "60.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node scripts/local-server.mjs",
+    "test": "node tests/multiplayer.mjs"
+  }
+}
