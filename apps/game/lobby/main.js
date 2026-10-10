@@ -128,6 +128,7 @@ function onMessage(m) {
     playersInLobby = m.players.length;
     syncAvatars(m.players);
     m.portals.forEach((state, i) => portals[i].set(state, serverOffset));
+    updateTeamSize(m.portals);
   } else if (m.t === 'correct') {
     me.x = m.x;
     me.z = m.z;
@@ -184,6 +185,26 @@ function travel(m) {
 }
 
 // --- HUD ---
+// Quem chegou primeiro na plataforma escolhe quantos esperar; quem só entrou vê a escolha.
+let teamPortal = null;
+function updateTeamSize(states) {
+  const mine = states.find(p => p.slots.includes(me.id));
+  teamPortal = mine?.owner === me.id ? mine.id : null;
+  $('teamSize').hidden = !mine;
+  if (!mine) return;
+  $('teamSizeButtons').hidden = !teamPortal;
+  $('teamSizeText').textContent = teamPortal
+    ? 'Quantos no time?'
+    : mine.target
+      ? `Time de ${mine.target} escolhido`
+      : 'Esperando o primeiro escolher o time…';
+  for (const b of $('teamSizeButtons').children)
+    b.classList.toggle('on', Number(b.dataset.n) === mine.target);
+}
+for (const b of $('teamSizeButtons').children)
+  b.onclick = () =>
+    teamPortal && socket?.send({ t: 'portalTarget', portal: teamPortal, n: Number(b.dataset.n) });
+
 let noticeTimer = 0;
 function notice(text) {
   $('notice').textContent = text;
@@ -245,8 +266,11 @@ addEventListener('blur', () => keys.clear());
 
 const raycaster = new THREE.Raycaster(),
   drags = new Map();
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', e => {
-  drags.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: 0 });
+  // Mouse: o botão direito gira a câmera e o esquerdo só clica. Toque: arrastar gira.
+  const rotate = e.pointerType !== 'mouse' || e.button === 2;
+  drags.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: 0, rotate });
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener('pointermove', e => {
@@ -257,13 +281,15 @@ renderer.domElement.addEventListener('pointermove', e => {
   d.x = e.clientX;
   d.y = e.clientY;
   d.moved += Math.abs(dx) + Math.abs(dy);
+  if (!d.rotate) return;
   camYaw -= dx * 0.006;
   camPitch = Math.min(1.2, Math.max(-0.1, camPitch + dy * 0.004));
 });
 renderer.domElement.addEventListener('pointerup', e => {
   const d = drags.get(e.pointerId);
   drags.delete(e.pointerId);
-  if (!d || d.moved > 8 || !socket) return;
+  // Convite só num clique curto com o botão esquerdo, ou num toque sem arrastar.
+  if (!d || !socket || d.moved > 8 || (d.rotate && e.pointerType === 'mouse')) return;
   // Toque/clique curto num boneco: convida para o grupo.
   raycaster.setFromCamera(
     new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1),

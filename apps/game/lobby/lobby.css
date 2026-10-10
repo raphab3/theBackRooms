@@ -150,6 +150,32 @@ button.primary {
   border: 1px solid var(--accent);
   border-radius: 8px;
 }
+#teamSize {
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+#teamSizeButtons {
+  display: flex;
+  gap: 6px;
+}
+#teamSizeButtons button {
+  width: 44px;
+  padding: 8px 0;
+  font-weight: 700;
+}
+#teamSizeButtons button.on {
+  background: var(--accent);
+  color: #241f08;
+  border-color: var(--accent);
+}
 #chat {
   left: 12px;
   bottom: 12px;

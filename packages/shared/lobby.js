@@ -9,6 +9,7 @@ export const PORTAL_SLOTS = 4;
 export const PORTAL_RADIUS = 1.6;
 export const PORTAL_COUNTDOWN_MS = 20000;
 export const PORTAL_FULL_MS = 3000;
+export const PORTAL_TARGET_MS = 5000; // time do tamanho escolhido completo: parte em 5 s
 export const PARTY_MAX = 4;
 export const EMOTES = ['wave', 'point', 'dance'];
 export const PORTALS = [
@@ -18,7 +19,23 @@ export const PORTALS = [
 ];
 
 export function newPortals() {
-  return PORTALS.map(p => ({ ...p, slots: Array(PORTAL_SLOTS).fill(null), endsAt: 0 }));
+  return PORTALS.map(p => ({
+    ...p,
+    slots: Array(PORTAL_SLOTS).fill(null),
+    endsAt: 0,
+    owner: null, // quem chegou primeiro: escolhe quantos esperar
+    target: null, // tamanho do time escolhido (1 a 4) ou null
+  }));
+}
+
+/** Quem chegou primeiro na plataforma escolhe quantos jogadores esperar antes de partir. */
+export function setPortalTarget(portal, playerId, n) {
+  if (portal.owner !== playerId)
+    throw Error('Só quem chegou primeiro na plataforma escolhe o tamanho do time.');
+  if (!Number.isInteger(n) || n < 1 || n > PORTAL_SLOTS)
+    throw Error(`Escolha de 1 a ${PORTAL_SLOTS} jogadores.`);
+  portal.target = n;
+  portal.endsAt = 0; // a contagem recomeça pela regra nova no próximo passo
 }
 
 export function clampToLobby(x, z) {
@@ -70,14 +87,26 @@ export function stepPortals(portals, players, parties, now) {
       }
     }
     const count = portal.slots.filter(Boolean).length;
+    // Dono saiu: a escolha de tamanho é desfeita e o próximo da fila vira dono.
+    if (!portal.owner || !portal.slots.includes(portal.owner)) {
+      portal.owner = portal.slots.find(Boolean) ?? null;
+      portal.target = null;
+    }
     if (!count) portal.endsAt = 0;
     else {
-      if (!portal.endsAt) portal.endsAt = now + PORTAL_COUNTDOWN_MS;
-      if (count === PORTAL_SLOTS) portal.endsAt = Math.min(portal.endsAt, now + PORTAL_FULL_MS);
-      if (now >= portal.endsAt) {
+      if (portal.target) {
+        // Com tamanho escolhido, espera completar e então parte em 5 s; se alguém sai, volta a esperar.
+        if (count < portal.target) portal.endsAt = 0;
+        else if (!portal.endsAt) portal.endsAt = now + PORTAL_TARGET_MS;
+      } else if (!portal.endsAt) portal.endsAt = now + PORTAL_COUNTDOWN_MS;
+      if (count === PORTAL_SLOTS)
+        portal.endsAt = Math.min(portal.endsAt || Infinity, now + PORTAL_FULL_MS);
+      if (portal.endsAt && now >= portal.endsAt) {
         fired.push({ portal: portal.id, level: portal.level, ids: portal.slots.filter(Boolean) });
         portal.slots.fill(null);
         portal.endsAt = 0;
+        portal.owner = null;
+        portal.target = null;
       }
     }
   }

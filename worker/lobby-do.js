@@ -8,6 +8,7 @@ import {
   RUN_SPEED,
   clampToLobby,
   newPortals,
+  setPortalTarget,
   stepPortals,
 } from '@backrooms/shared/lobby.js';
 import { PHASE_ORDER } from '@backrooms/shared/world.js';
@@ -196,6 +197,16 @@ class LobbyDO {
       p.emote = { e: msg.e, until: now + EMOTE_MS };
       return;
     }
+    if (msg.t === 'portalTarget') {
+      const portal = this.portals.find(v => v.id === msg.portal);
+      if (!portal) throw new ApiError('Portal não encontrado.');
+      try {
+        setPortalTarget(portal, p.id, msg.n);
+      } catch (error) {
+        throw new ApiError(error.message);
+      }
+      return;
+    }
     if (msg.t === 'invite') return this.invite(p, msg.to, now);
     if (msg.t === 'accept') return this.accept(p, now);
     if (msg.t === 'leaveParty') return this.leaveParty(p.id);
@@ -276,7 +287,14 @@ class LobbyDO {
         emote: p.emote?.e || null,
         party: this.partyOf(p.id)[0],
       })),
-      portals: this.portals.map(({ id, level, slots, endsAt }) => ({ id, level, slots, endsAt })),
+      portals: this.portals.map(({ id, level, slots, endsAt, owner, target }) => ({
+        id,
+        level,
+        slots,
+        endsAt,
+        owner,
+        target,
+      })),
     });
   }
 

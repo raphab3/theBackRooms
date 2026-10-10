@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   PORTAL_COUNTDOWN_MS,
   PORTAL_FULL_MS,
+  PORTAL_TARGET_MS,
   newPortals,
+  setPortalTarget,
   stepPortals,
 } from '@backrooms/shared/lobby.js';
 
@@ -98,5 +100,65 @@ describe('portal de 4 lugares', () => {
       ['p1', ['a']],
       ['p3', ['b']],
     ]);
+  });
+
+  describe('tamanho do time escolhido por quem chegou primeiro', () => {
+    it('com 2 escolhido, espera o segundo sem limite e então parte em 5 s', () => {
+      const portals = newPortals(),
+        ps = players([['a', on]]);
+      stepPortals(portals, ps, new Map(), 0);
+      expect(portals[0].owner).toBe('a');
+      setPortalTarget(portals[0], 'a', 2);
+      stepPortals(portals, ps, new Map(), 100);
+      expect(portals[0].endsAt).toBe(0);
+      // Bem depois dos 20 s normais, continua esperando.
+      expect(stepPortals(portals, ps, new Map(), 60000).fired).toEqual([]);
+      ps.set('b', { ...on });
+      stepPortals(portals, ps, new Map(), 61000);
+      expect(portals[0].endsAt).toBe(61000 + PORTAL_TARGET_MS);
+      const { fired } = stepPortals(portals, ps, new Map(), 61000 + PORTAL_TARGET_MS);
+      expect(fired[0].ids).toEqual(['a', 'b']);
+    });
+
+    it('escolher 1 com a contagem de 20 s rodando parte em 5 s', () => {
+      const portals = newPortals(),
+        ps = players([['a', on]]);
+      stepPortals(portals, ps, new Map(), 0);
+      setPortalTarget(portals[0], 'a', 1);
+      stepPortals(portals, ps, new Map(), 1000);
+      expect(portals[0].endsAt).toBe(1000 + PORTAL_TARGET_MS);
+    });
+
+    it('se alguém sai e o time fica incompleto, a contagem para', () => {
+      const portals = newPortals(),
+        ps = players([
+          ['a', on],
+          ['b', on],
+        ]);
+      stepPortals(portals, ps, new Map(), 0);
+      setPortalTarget(portals[0], 'a', 2);
+      stepPortals(portals, ps, new Map(), 100);
+      expect(portals[0].endsAt).toBe(100 + PORTAL_TARGET_MS);
+      ps.set('b', { ...away });
+      stepPortals(portals, ps, new Map(), 200);
+      expect(portals[0].endsAt).toBe(0);
+    });
+
+    it('só o dono escolhe; quando ele sai, a escolha é desfeita e o próximo vira dono', () => {
+      const portals = newPortals(),
+        ps = players([
+          ['a', on],
+          ['b', on],
+        ]);
+      stepPortals(portals, ps, new Map(), 0);
+      expect(() => setPortalTarget(portals[0], 'b', 2)).toThrow('primeiro');
+      expect(() => setPortalTarget(portals[0], 'a', 5)).toThrow('1 a 4');
+      setPortalTarget(portals[0], 'a', 3);
+      ps.set('a', { ...away });
+      stepPortals(portals, ps, new Map(), 100);
+      expect(portals[0].owner).toBe('b');
+      expect(portals[0].target).toBe(null);
+      expect(portals[0].endsAt).toBe(100 + PORTAL_COUNTDOWN_MS);
+    });
   });
 });

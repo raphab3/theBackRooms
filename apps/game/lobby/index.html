@@ -27,10 +27,17 @@
     <section id="hud" hidden>
       <div id="lobbyInfo"></div>
       <div id="help">
-        WASD mover · Shift correr · Espaço pular · 1 2 3 emotes · Enter chat · clique num jogador
-        para convidar · G sair do grupo
+        WASD mover · botão direito gira a câmera · Shift correr · Espaço pular · 1 2 3 emotes ·
+        Enter chat · clique num jogador para convidar · G sair do grupo
       </div>
       <div id="notice" role="status"></div>
+      <div id="teamSize" hidden>
+        <span id="teamSizeText">Quantos no time?</span>
+        <span id="teamSizeButtons">
+          <button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button
+          ><button data-n="4">4</button>
+        </span>
+      </div>
       <div id="invite" hidden>
         <span id="inviteText"></span>
         <button id="acceptInvite">Aceitar</button>

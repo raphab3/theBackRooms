@@ -203,7 +203,7 @@ class Portal {
     this.label = new CSS2DObject(tag);
     this.label.position.set(0, 3.05, -2.1);
     this.group.add(this.label);
-    this.state = { slots: Array(PORTAL_SLOTS).fill(null), endsAt: 0 };
+    this.state = { slots: Array(PORTAL_SLOTS).fill(null), endsAt: 0, owner: null, target: null };
     this.render(0);
   }
 
@@ -213,7 +213,7 @@ class Portal {
   }
 
   render(now, selfId) {
-    const { slots, endsAt } = this.state,
+    const { slots, endsAt, target } = this.state,
       count = slots.filter(Boolean).length,
       left = endsAt
         ? Math.max(0, Math.ceil((endsAt - (now + (this.serverOffset || 0))) / 1000))
@@ -221,9 +221,12 @@ class Portal {
     slots.forEach((id, i) =>
       this.slots[i].material.color.set(id === selfId ? 0xe8c547 : id ? 0x67e3f2 : 0x3a3a3a),
     );
-    const html = `${LEVEL_NAMES[this.def.level] || this.def.level}<br><b>${count}/${PORTAL_SLOTS}</b>${
-      left ? ` · parte em <b>${left}s</b>` : ' · pise na plataforma'
-    }`;
+    const status = left
+      ? `parte em <b>${left}s</b>`
+      : target && count
+        ? `time de ${target} · falta${target - count > 1 ? 'm' : ''} <b>${target - count}</b>`
+        : 'pise na plataforma';
+    const html = `${LEVEL_NAMES[this.def.level] || this.def.level}<br><b>${count}/${PORTAL_SLOTS}</b> · ${status}`;
     if (html !== this.lastHtml) this.tagEl.innerHTML = this.lastHtml = html;
     const speed = endsAt ? 4 : 1;
     this.ring.rotation.z += 0.01 * speed;
