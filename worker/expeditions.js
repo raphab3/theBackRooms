@@ -75,4 +75,22 @@ async function createRoom(env, players, { level, mode, campaign, start = false, 
   throw new ApiError('Não foi possível criar a sala. Tente novamente.', 503);
 }
 
-export { createRoom, randomCode, roomRequest, roomStub };
+// Expedição do mundo aberto (WorldDO): mesma ideia de createRoom, outro Durable Object.
+async function createWorldExpedition(env, players, { lobbyKey = null } = {}) {
+  if (!env.WORLDS) throw new ApiError('Expedições indisponíveis neste momento.', 503);
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+  for (let i = 0; i < 5; i++) {
+    const code = randomCode(),
+      response = await env.WORLDS.get(env.WORLDS.idFromName(code)).fetch(
+        new Request('https://world.internal/init', {
+          method: 'POST',
+          body: JSON.stringify({ code, seed, players, lobbyKey }),
+        }),
+      );
+    if (response.ok) return { code };
+    if (response.status !== 409) throw new ApiError('Não foi possível abrir a expedição.', 503);
+  }
+  throw new ApiError('Não foi possível abrir a expedição. Tente novamente.', 503);
+}
+
+export { createRoom, createWorldExpedition, randomCode, roomRequest, roomStub };

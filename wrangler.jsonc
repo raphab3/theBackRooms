@@ -30,11 +30,13 @@
       { "name": "ROOMS", "class_name": "RoomDO" },
       { "name": "LOBBIES", "class_name": "LobbyDO" },
       { "name": "LOBBY_DIRECTORY", "class_name": "LobbyDirectoryDO" },
+      { "name": "WORLDS", "class_name": "WorldDO" },
     ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["RoomDO"] },
     { "tag": "v2", "new_sqlite_classes": ["LobbyDO", "LobbyDirectoryDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["WorldDO"] },
   ],
   // Telemetria (worker/telemetry.js) desligada até ativar o Analytics Engine no painel da conta;
   // sem o binding ela não faz nada. Para ligar, descomente:

@@ -12,8 +12,7 @@ import {
   setPortalTarget,
   stepPortals,
 } from '@backrooms/shared/lobby.js';
-import { PHASE_ORDER } from '@backrooms/shared/world.js';
-import { createRoom } from './expeditions.js';
+import { createWorldExpedition } from './expeditions.js';
 import { hashKey } from './inventory.js';
 import { readArms } from './workshop.js';
 import { ApiError, json } from './http.js';
@@ -353,14 +352,8 @@ class LobbyDO {
       });
     }
     try {
-      const room = await createRoom(this.env, players, {
-        level: level || PHASE_ORDER[0],
-        mode: 'normal',
-        // Expedição de um nível só: no fim o grupo volta ao lobby, sem avançar de fase sozinho.
-        campaign: false,
-        start: true,
-        lobbyKey: this.meta.key,
-      });
+      // O portal leva ao mundo aberto: acampamento a céu aberto e edificações em volta.
+      const room = await createWorldExpedition(this.env, players, { lobbyKey: this.meta.key });
       group.forEach((p, i) => {
         this.send(p.id, {
           t: 'travel',

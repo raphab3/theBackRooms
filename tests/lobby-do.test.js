@@ -117,13 +117,16 @@ describe('LobbyDO', () => {
     });
     const [ta, tb] = await Promise.all([a, b].map(c => c.wait(m => m.t === 'travel')));
     expect(ta.code).toBe(tb.code);
-    const resumed = await post('/api/rooms/resume', { code: tb.code, id: tb.id, token: tb.token });
-    expect(resumed.status).toBe(200);
-    expect(resumed.data.room.status).toBe('playing');
-    expect(resumed.data.room.players.map(p => p.name).sort()).toEqual(['Ana', 'Rafa']);
+    // O portal abre uma expedição do mundo aberto com os dois dentro, no acampamento.
+    const world = env.WORLDS.get(env.WORLDS.idFromName(tb.code)),
+      inside = await runInDurableObject(world, i => i.state.players.map(p => [p.name, p.zone]));
+    expect(inside.sort()).toEqual([
+      ['Ana', 'camp'],
+      ['Rafa', 'camp'],
+    ]);
   });
 
-  it('vitória credita o estoque uma vez só e entra no histórico do Posto Zero', async () => {
+  it('sair pelo portal do mundo aberto credita o estoque e entra no histórico do Posto Zero', async () => {
     const key = 'ab'.repeat(32),
       { data } = await lobby('private', { name: 'Rafa' }),
       a = await connect(data.key, 'Rafa');
@@ -139,21 +142,39 @@ describe('LobbyDO', () => {
       await instance.travel('backrooms', group);
     });
     const ticket = await a.wait(m => m.t === 'travel');
-    // A equipe vence com sucata na mochila.
-    const room = env.ROOMS.get(env.ROOMS.idFromName(ticket.code));
-    await runInDurableObject(room, async instance => {
-      const r = instance.room,
-        p = r.players[0];
-      p.bag.push({ item: 'scrap', qty: 6 });
-      r.fuses = r.fuses.map(() => true);
-      r.status = 'won';
-      instance.run('sync', { id: p.id, token: p.token });
-      await instance.saving;
-      // Salvar de novo não credita duas vezes.
-      r.expeditionSaved = false;
-      instance.saveResult();
-      await instance.saving;
+    // No mundo aberto: entra pelo WebSocket, junta sucata e sai pelo portal segurando E.
+    const response = await SELF.fetch(`${ORIGIN}/api/world/${ticket.code}/ws`, {
+      headers: { Upgrade: 'websocket', Origin: ORIGIN },
     });
+    expect(response.status).toBe(101);
+    const ws = response.webSocket,
+      replies = [];
+    ws.accept();
+    ws.addEventListener('message', e => {
+      replies.push(JSON.parse(e.data));
+    });
+    const ask = (action, body = {}) =>
+      new Promise((resolve, reject) => {
+        const reqId = Math.random();
+        ws.send(JSON.stringify({ action, reqId, ...body }));
+        const started = Date.now(),
+          poll = () => {
+            const r = replies.find(m => m.reqId === reqId);
+            if (r) return resolve(r);
+            if (Date.now() - started > 3000) return reject(new Error('timeout'));
+            setTimeout(poll, 10);
+          };
+        poll();
+      });
+    expect((await ask('hello', { id: ticket.id, token: ticket.token })).type).toBe('result');
+    const world = env.WORLDS.get(env.WORLDS.idFromName(ticket.code));
+    await runInDurableObject(world, instance => {
+      const p = instance.state.players[0];
+      p.bag.push({ item: 'scrap', qty: 6 });
+      Object.assign(p, { x: 24.5, y: 32.5, leaving: Date.now() - 5000 }); // no portal, segurando E
+    });
+    const left = await ask('leave');
+    expect(left.extracted).toEqual({ [ticket.id]: { almond: 2, scrap: 6 } });
     const inv = await post('/api/inventory/get', { key, name: 'Rafa' });
     expect(inv.data.items).toEqual({ scrap: 6, almond: 2 });
     // O Posto Zero do time guardou a expedição.
@@ -161,7 +182,7 @@ describe('LobbyDO', () => {
     expect(again.status).toBe(101);
     const info = await runInDurableObject(stub, instance => instance.meta);
     expect(info.owner).toBe('Rafa');
-    expect(info.base).toEqual({ expeditions: 1, wins: 1, loot: { scrap: 6, almond: 2 } });
+    expect(info.base).toEqual({ expeditions: 1, wins: 0, loot: { scrap: 6, almond: 2 } });
   });
 
   it('chave inválida não abre estoque', async () => {

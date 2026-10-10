@@ -4,6 +4,7 @@ import { api } from './api.js';
 export { api };
 export { LobbyDirectoryDO, LobbyDO } from './lobby-do.js';
 export { RoomDO } from './room-do.js';
+export { WorldDO } from './world-do.js';
 
 export default {
   async fetch(request, env) {

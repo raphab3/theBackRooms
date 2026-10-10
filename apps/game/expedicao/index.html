@@ -13,16 +13,14 @@
 
     <section id="hud" hidden>
       <div id="status">
-        <div id="levelName">NÍVEL 0 · BACKROOMS</div>
-        <div>
-          Fusíveis <b id="fuseCount">0 / 3</b> · Moedas <b id="coins">0</b> ·
-          <span id="clock">00:00</span>
-        </div>
+        <div id="levelName">ACAMPAMENTO</div>
+        <div>Moedas da equipe <b id="coins">0</b> · <span id="clock">00:00</span></div>
       </div>
       <div id="team"></div>
       <div id="help">
         WASD mover · clique ou espaço atira (segure para carregar) · botão direito ou ← → gira ·
-        Shift correr · E desmontar sucata · F lanterna · V reviver (25 moedas)
+        Shift correr · E entrar, sair, desmontar · segure E no portal para voltar · F lanterna ·
+        Enter chat
       </div>
       <label id="settings"
         >Qualidade
@@ -42,14 +40,14 @@
         <button data-action="fire" title="Atirar (segure para carregar) (Clique)">
           <span>🔥</span><kbd>Clique</kbd>
         </button>
-        <button data-action="use" title="Desmontar sucata (segure) (E)">
-          <span>🔩</span><kbd>E</kbd>
+        <button
+          data-action="use"
+          title="Entrar, sair, voltar ao Posto Zero ou desmontar sucata (E)"
+        >
+          <span>✋</span><kbd>E</kbd>
         </button>
         <button data-action="run" title="Correr (Shift)"><span>🏃</span><kbd>Shift</kbd></button>
         <button data-action="light" title="Lanterna (F)"><span>🔦</span><kbd>F</kbd></button>
-        <button data-action="revive" title="Reviver a equipe (25 moedas) (V)">
-          <span>♥</span><kbd>V</kbd>
-        </button>
         <button data-action="chat" title="Conversar (Enter)">
           <span>💬</span><kbd>Enter</kbd>
         </button>
@@ -62,7 +60,7 @@
 
     <section id="down" class="panel" hidden>
       <h2>Você foi pego</h2>
-      <p>Um colega pode reviver a equipe com V (25 moedas).</p>
+      <p id="downText">A mochila ficou onde você caiu. Voltando ao acampamento…</p>
     </section>
 
     <section id="end" class="panel" hidden>

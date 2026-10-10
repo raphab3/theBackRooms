@@ -1,8 +1,19 @@
-// Expedição em 3D: a mesma sala (RoomDO) do jogo clássico, desenhada em primeira pessoa.
-// Chega pelo portal do lobby com #travel={code,id,token,name}; no fim, volta ao lobby.
+// Expedição no mundo aberto (WorldDO): acampamento a céu aberto e edificações em volta. Cada
+// jogador está numa zona; trocar de zona desmonta e monta a cena. Chega pelo portal do lobby com
+// #travel={code,id,token,name}; sai pelo portal do acampamento (segurando E) de volta ao lobby.
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { cannonColor } from '@backrooms/shared/arms.js';
+import {
+  BUILDINGS,
+  GENERATOR,
+  INSIDE_EXIT,
+  LEAVE_MS,
+  PORTAL,
+  USE_REACH,
+  buildingSeed,
+  createCamp,
+} from '@backrooms/shared/camp.js';
 import { FIRE, traceShot } from '@backrooms/shared/combat.js';
 import { ITEMS, SALVAGE_MS, SALVAGE_REACH, countItem } from '@backrooms/shared/loot.js';
 import { createWorld } from '@backrooms/shared/world.js';
@@ -12,6 +23,7 @@ import { setupLandscape } from '../lobby/landscape.js';
 import { RemoteBuffer } from '../lobby/net.js';
 import { bindQualitySelect, createPipeline } from '../lobby/quality.js';
 import { createStats } from '../lobby/stats.js';
+import { buildCamp } from './camp3d.js';
 import { createEffects, createSfx } from './effects.js';
 import { S, buildLevel } from './level.js';
 
@@ -23,8 +35,9 @@ const WALK = 1.85, // células/s, como no jogo clássico
   SEND_MS = 1000 / 30,
   IDLE_SEND_MS = 1000,
   CORRECTION = 0.5,
-  RETURN_MS = 8000,
-  RETURN_KEY = 'backrooms.lobbyReturn';
+  RETURN_MS = 6000,
+  RETURN_KEY = 'backrooms.lobbyReturn',
+  ICONS = { scrap: '🔩', almond: '💧', core_fire: '🔥' };
 
 // --- Renderização ---
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -39,14 +52,14 @@ Object.assign(labels.domElement.style, {
 });
 document.body.append(labels.domElement);
 const scene = new THREE.Scene(),
-  camera = new THREE.PerspectiveCamera(70, 1, 0.05, 60);
+  camera = new THREE.PerspectiveCamera(70, 1, 0.05, 120);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
 const lantern = new THREE.SpotLight(0xfff4d8, 18, 16, 0.5, 0.45, 1.4);
 lantern.position.set(0.15, -0.15, 0);
 lantern.target.position.set(0, 0, -1);
 camera.add(lantern, lantern.target);
-// Braço-Arma em primeira pessoa: manga, antebraço e o canhão que brilha ao carregar.
+// Braço-Arma em primeira pessoa: antebraço e o canhão que brilha ao carregar.
 const arm = new THREE.Group(),
   cannonGlow = new THREE.MeshBasicMaterial({ color: 0xff8a2a });
 arm.add(
@@ -60,18 +73,11 @@ muzzle.position.z = -0.17;
 arm.add(muzzle);
 arm.position.set(0.2, -0.17, -0.45);
 camera.add(arm);
-const chargedColor = new THREE.Color(0xff3a10);
-const effects = createEffects(scene),
+const chargedColor = new THREE.Color(0xff3a10),
+  effects = createEffects(scene),
   sfx = createSfx(),
-  seenEffects = new Set();
-const ICONS = { scrap: '🔩', almond: '💧', core_fire: '🔥' };
-let myBag = [],
-  salvage = null; // { pile, start } enquanto segura E
-let chargeStart = 0,
-  recoil = 0,
-  shake = 0,
-  lastShot = 0;
-const pipeline = createPipeline(renderer, scene, camera),
+  seenEffects = new Set(),
+  pipeline = createPipeline(renderer, scene, camera),
   hum = createHum();
 bindQualitySelect($('quality'), pipeline);
 const stats = createStats(renderer, pipeline);
@@ -88,11 +94,16 @@ resize();
 const keys = new Set(),
   buffer = new RemoteBuffer(),
   remotes = new Map(),
-  me = { x: 1.5, y: 1.5, a: 0, pitch: 0, stamina: 100, respawns: 0, alive: true };
+  me = { x: 0, y: 0, a: -Math.PI / 2, pitch: 0, stamina: 100, alive: true, armLevel: 1 };
 let ticket = null,
-  room = null,
-  world = null,
+  view = null,
+  camp = null,
+  zoneId = null,
+  zoneRoot = null,
+  zoneGrid = null,
+  zoneWorld = null,
   level = null,
+  campScene = null,
   ws = null,
   seq = 0,
   reqId = 0,
@@ -100,25 +111,18 @@ let ticket = null,
   lastSent = '',
   ended = false,
   stick = { x: 0, y: 0 },
-  touchRun = false;
+  touchRun = false,
+  myBag = [],
+  salvage = null, // { pile, start } enquanto segura E num monte
+  leaveHold = null, // { start } enquanto segura E no portal
+  chargeStart = 0,
+  recoil = 0,
+  shake = 0,
+  lastShot = 0;
 
-function payload() {
-  return {
-    id: ticket.id,
-    token: ticket.token,
-    round: room.round,
-    seq: ++seq,
-    x: me.x,
-    y: me.y,
-    a: me.a,
-    respawns: me.respawns,
-  };
-}
 function send(action, extra = {}) {
-  if (ws?.readyState === 1)
-    ws.send(JSON.stringify({ ...payload(), ...extra, action, reqId: ++reqId }));
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ action, reqId: ++reqId, ...extra }));
 }
-
 let noticeTimer = 0;
 function notice(text) {
   $('notice').textContent = text;
@@ -127,8 +131,8 @@ function notice(text) {
   noticeTimer = setTimeout(() => $('notice').classList.remove('show'), 3000);
 }
 
-// --- Entrada na sala ---
-async function start() {
+// --- Entrada na expedição ---
+function start() {
   const raw = new URLSearchParams(location.hash.slice(1)).get('travel');
   try {
     ticket = JSON.parse(raw);
@@ -138,30 +142,7 @@ async function start() {
   }
   // Sem o bilhete na URL, recarregar a página não reaproveita a credencial.
   history.replaceState(null, '', location.pathname);
-  try {
-    const response = await fetch('/api/rooms/resume', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: ticket.code, id: ticket.id, token: ticket.token }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw Error(data.error || 'A expedição não respondeu.');
-    applyRoom(data.room, true);
-    world = createWorld(room.seed, room.level);
-    level = buildLevel(scene, world);
-    // O servidor nasce todo mundo com ângulo 0; vira para o primeiro corredor aberto.
-    const cell = (dx, dy) => world.grid[Math.floor(me.y) + dy]?.[Math.floor(me.x) + dx] === 0;
-    me.a =
-      [0, Math.PI / 2, Math.PI, -Math.PI / 2].find(a =>
-        cell(Math.round(Math.cos(a)), Math.round(Math.sin(a))),
-      ) ?? 0;
-    pipeline.warm();
-    connect();
-    $('loading').hidden = true;
-    $('hud').hidden = false;
-  } catch (e) {
-    fail(e.message);
-  }
+  connect();
 }
 function fail(message) {
   $('loadingError').textContent = message;
@@ -170,62 +151,105 @@ function fail(message) {
 
 function connect() {
   const scheme = location.protocol === 'http:' ? 'ws:' : 'wss:';
-  ws = new WebSocket(`${scheme}//${location.host}/api/rooms/${ticket.code}/ws`);
+  ws = new WebSocket(`${scheme}//${location.host}/api/world/${ticket.code}/ws`);
+  ws.onopen = () => send('hello', { id: ticket.id, token: ticket.token });
   ws.onmessage = event => {
     const msg = JSON.parse(event.data);
-    if (msg.type === 'room') applyRoom(msg.room);
-    else if (msg.type === 'result' && msg.room) applyRoom(msg.room);
-    else if (msg.type === 'error' && msg.error) notice(msg.error);
+    if (msg.type === 'world') applyView(msg.view);
+    else if (msg.type === 'result' && msg.extracted) finish(msg.extracted[ticket.id] || {});
+    else if (msg.type === 'error' && msg.error) {
+      if (!view) fail(msg.error);
+      else notice(msg.error);
+    }
   };
   ws.onclose = () => {
     if (!ended) setTimeout(connect, 1500);
   };
 }
 
-function applyRoom(next, first = false) {
-  room = next;
-  const self = room.players.find(p => p.id === ticket.id);
-  if (self) {
-    // Reviveu (o servidor conta os renascimentos): volta para o início.
-    if (first || self.respawns !== me.respawns) {
-      me.x = self.x;
-      me.y = self.y;
-      me.respawns = self.respawns;
-    } else if (Math.hypot(self.x - me.x, self.y - me.y) > CORRECTION) {
-      me.x = self.x;
-      me.y = self.y;
-    }
-    me.alive = self.alive;
-    // Avisa o que entrou na mochila desde o último estado.
+// --- Zonas: acampamento ou o interior de uma edificação ---
+function disposeZone() {
+  if (!zoneRoot) return;
+  // Os letreiros (CSS2D) não saem do DOM sozinhos quando o grupo é removido.
+  zoneRoot.traverse(o => o.isCSS2DObject && o.element.remove());
+  scene.remove(zoneRoot);
+  for (const avatar of remotes.values()) avatar.dispose();
+  remotes.clear();
+  buffer.frames = [];
+}
+function enterZone(next) {
+  disposeZone();
+  zoneId = next.zone;
+  zoneRoot = new THREE.Group();
+  scene.add(zoneRoot);
+  camp ??= createCamp(next.seed);
+  me.x = next.me.x;
+  me.y = next.me.y;
+  if (zoneId === 'camp') {
+    campScene = buildCamp(zoneRoot, camp, scene);
+    level = null;
+    zoneWorld = null;
+    zoneGrid = camp.grid;
+    lantern.visible = false;
+    // Olha para o gerador ao chegar.
+    me.a = Math.atan2(GENERATOR.y + 1 - me.y, GENERATOR.x + 1 - me.x);
+  } else {
+    const index = BUILDINGS.findIndex(b => b.id === zoneId);
+    zoneWorld = createWorld(buildingSeed(next.seed, index), next.level);
+    level = buildLevel(zoneRoot, zoneWorld, scene);
+    campScene = null;
+    zoneGrid = zoneWorld.grid;
+    lantern.visible = true;
+    const cell = (dx, dy) => zoneGrid[Math.floor(me.y) + dy]?.[Math.floor(me.x) + dx] === 0;
+    me.a =
+      [0, Math.PI / 2, Math.PI, -Math.PI / 2].find(a =>
+        cell(Math.round(Math.cos(a)), Math.round(Math.sin(a))),
+      ) ?? 0;
+  }
+  const building = BUILDINGS.find(b => b.id === zoneId);
+  $('levelName').textContent = building ? building.name.toUpperCase() : 'ACAMPAMENTO';
+  pipeline.warm();
+}
+
+function applyView(next) {
+  const first = !view;
+  view = next;
+  if (first) {
+    $('loading').hidden = true;
+    $('hud').hidden = false;
+  }
+  if (view.zone !== zoneId) enterZone(view);
+  else if (view.me && Math.hypot(view.me.x - me.x, view.me.y - me.y) > CORRECTION) {
+    me.x = view.me.x;
+    me.y = view.me.y;
+  }
+  if (view.me) {
     if (!first)
       for (const item of Object.keys(ITEMS)) {
-        const diff = countItem(self.bag || [], item) - countItem(myBag, item);
+        const diff = countItem(view.me.bag, item) - countItem(myBag, item);
         if (diff > 0) notice(`+${diff} ${ITEMS[item].name}`);
       }
-    myBag = self.bag || [];
-    me.carrying = self.carrying || 0;
-    me.armLevel = self.armLevel || 1;
+    myBag = view.me.bag;
+    me.alive = view.me.alive;
+    me.armLevel = view.me.armLevel;
   }
   buffer.push(
     performance.now(),
-    room.players
-      .filter(p => p.id !== ticket.id)
-      .map(p => ({
-        id: p.id,
-        x: p.x * S,
-        z: p.y * S,
-        yaw: Math.PI / 2 - p.a,
-        anim: p.alive ? 'walk' : 'down',
-      })),
+    view.players.map(p => ({
+      id: p.id,
+      x: p.x * S,
+      z: p.y * S,
+      yaw: Math.PI / 2 - p.a,
+      anim: p.alive ? 'walk' : 'down',
+    })),
   );
   syncRemotes();
   renderHud();
   renderChat();
-  // Tiros dos colegas (os meus já foram desenhados na hora do clique).
-  for (const e of room.effects || []) {
+  for (const e of view.effects) {
     if (seenEffects.has(e.id)) continue;
     seenEffects.add(e.id);
-    if (e.by === ticket.id || !level) continue;
+    if (e.by === ticket.id) continue;
     effects.fire(
       new THREE.Vector3(e.from.x * S, 1.3, e.from.y * S),
       new THREE.Vector3(e.to.x * S, 1.3, e.to.y * S),
@@ -234,19 +258,17 @@ function applyRoom(next, first = false) {
     sfx.shot(e.kind === 'charged');
   }
   if (seenEffects.size > 200) seenEffects.clear();
-  if ((room.status === 'won' || room.status === 'lost') && !ended) finish(room.status === 'won');
 }
 
 function syncRemotes() {
   const seen = new Set();
-  for (const p of room.players) {
-    if (p.id === ticket.id) continue;
+  for (const p of view.players) {
     seen.add(p.id);
     if (!remotes.has(p.id)) {
       const avatar = new Avatar({ name: p.name, color: p.color, skin: p.skin || 'a' });
       void avatar.ready.then(() => pipeline.warm({ passes: false }));
       remotes.set(p.id, avatar);
-      scene.add(avatar.root);
+      zoneRoot.add(avatar.root);
     }
   }
   for (const [id, avatar] of remotes)
@@ -256,20 +278,23 @@ function syncRemotes() {
     }
 }
 
+const zoneName = zone =>
+  zone === 'camp' ? 'acampamento' : BUILDINGS.find(b => b.id === zone)?.name || zone;
 function renderHud() {
-  const got = room.fuses.filter(Boolean).length;
-  $('fuseCount').textContent = `${got} / ${room.fuses.length}`;
-  $('coins').textContent = room.balance;
-  $('team').innerHTML = '';
-  for (const p of room.players) {
-    const line = document.createElement('div');
-    line.textContent =
-      (p.id === ticket.id ? `${p.name} (você)` : p.name) + (p.alive ? '' : ' · pego');
-    line.style.color = p.color;
-    line.classList.toggle('out', !p.alive);
-    $('team').append(line);
-  }
+  $('coins').textContent = view.balance;
+  const team = view.team
+    .map(
+      p =>
+        `<div style="color:${p.color}" class="${p.alive && !p.left ? '' : 'out'}">${escapeHtml(p.name)}${
+          p.id === ticket.id ? ' (você)' : ''
+        } · ${p.left ? 'voltou' : p.alive ? zoneName(p.zone) : 'pego'}</div>`,
+    )
+    .join('');
+  if (team !== $('team').dataset.html) $('team').innerHTML = $('team').dataset.html = team;
   $('down').hidden = me.alive || ended;
+  if (!me.alive)
+    $('downText').textContent =
+      `A mochila ficou onde você caiu. Volta ao acampamento em ${Math.ceil((view.me?.respawnIn || 0) / 1000)} s.`;
   const slots = [];
   for (let i = 0; i < 12; i++) {
     const slot = myBag[i];
@@ -277,35 +302,29 @@ function renderHud() {
       `<div class="slot" title="${slot ? ITEMS[slot.item].name : ''}">${slot ? `${ICONS[slot.item]}<b>${slot.qty}</b>` : ''}</div>`,
     );
   }
-  if (me.carrying)
-    slots.push(`<div class="carrying">carregando ${me.carrying} mochila(s) de colegas</div>`);
+  if (view.me?.carrying)
+    slots.push(`<div class="carrying">carregando ${view.me.carrying} mochila(s) de colegas</div>`);
   const html = slots.join('');
   if (html !== $('bag').dataset.html) $('bag').innerHTML = $('bag').dataset.html = html;
 }
+const escapeHtml = text => String(text).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 
-function finish(won) {
+function finish(mine) {
   ended = true;
-  send('sync');
-  const seconds = Math.round(((room.finished || room.now) - room.started) / 1000);
-  $('endTitle').textContent = won ? 'A equipe encontrou a saída!' : 'A expedição chegou ao fim.';
-  $('endSummary').textContent =
-    `Tempo ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} · ` +
-    `fusíveis ${room.fuses.filter(Boolean).length}/${room.fuses.length} · ` +
-    `quedas ${room.players.filter(p => !p.alive).length} · voltando ao lobby…`;
-  const mine = room.extracted?.[ticket.id] || {},
-    loot = Object.entries(mine)
-      .map(([item, qty]) => `${qty} ${ITEMS[item].name}`)
-      .join(', ');
-  $('endLoot').textContent = won
-    ? loot
-      ? `Você levou: ${loot}. Guardado no seu estoque.`
-      : 'Você não trouxe nada desta vez.'
-    : 'A mochila ficou para trás.';
+  const loot = Object.entries(mine)
+    .map(([item, qty]) => `${qty} ${ITEMS[item].name}`)
+    .join(', ');
+  $('endTitle').textContent = 'De volta ao Posto Zero';
+  $('endSummary').textContent = 'Você atravessou o portal do acampamento.';
+  $('endLoot').textContent = loot
+    ? `Você levou: ${loot}. Guardado no seu estoque.`
+    : 'Você voltou de mãos vazias desta vez.';
   $('end').hidden = false;
   $('down').hidden = true;
   setTimeout(backToLobby, RETURN_MS);
 }
 function backToLobby() {
+  ended = true;
   ws?.close();
   let target = '/lobby/';
   try {
@@ -328,12 +347,12 @@ function releaseShot() {
   if (wantsCharged && kind === 'primary') notice('Sem Amêndoa para o tiro carregado.');
   chargeStart = 0;
   const now = performance.now();
-  if (!room || !me.alive || ended || now - lastShot < FIRE[kind].cooldownMs) return;
+  if (!view || !me.alive || ended || now - lastShot < FIRE[kind].cooldownMs) return;
   lastShot = now;
-  send('shoot', { kind });
-  // Desenha na hora com o mesmo traçado do servidor (o dano chega no próximo estado da sala).
-  const enemy = room.enemy.dead ? null : room.enemy,
-    shot = traceShot(world.grid, me, me.a, enemy, kind),
+  send('shoot', { kind, a: me.a });
+  // Desenha na hora com o mesmo traçado do servidor (o dano chega no próximo estado).
+  const enemy = view.enemy && !view.enemy.dead ? view.enemy : null,
+    shot = traceShot(zoneGrid, me, me.a, enemy, kind),
     from = new THREE.Vector3();
   muzzle.getWorldPosition(from);
   effects.fire(from, new THREE.Vector3(shot.end.x * S, 1.3, shot.end.y * S), kind === 'charged');
@@ -345,54 +364,77 @@ function releaseShot() {
   }
 }
 
-// --- Sucata: segurar E perto de um monte por 2 s ---
-function nearestPile() {
-  let best = null;
-  for (const pile of room?.loot?.piles || []) {
-    const d = Math.hypot(pile.x - me.x, pile.y - me.y);
-    if (d <= SALVAGE_REACH && (!best || d < best.d)) best = { id: pile.id, d };
+// --- E: o que estiver perto (porta, saída, portal ou sucata) ---
+const near = p => Math.hypot(p.x - me.x, p.y - me.y) <= USE_REACH;
+function useTarget() {
+  if (!view || !me.alive || ended) return null;
+  if (zoneId === 'camp') {
+    const door = camp.buildings.find(b => near(b.doorAt));
+    if (door) return { kind: 'door', label: `Entrar: ${door.name}` };
+    if (near(PORTAL)) return { kind: 'portal', label: 'Segure E para voltar ao Posto Zero' };
+  } else if (near(INSIDE_EXIT)) return { kind: 'exit', label: 'Sair para o acampamento' };
+  let pile = null;
+  for (const v of view.loot.piles) {
+    const d = Math.hypot(v.x - me.x, v.y - me.y);
+    if (d <= SALVAGE_REACH && (!pile || d < pile.d)) pile = { id: v.id, d };
   }
-  return best?.id ?? null;
+  return pile && { kind: 'pile', id: pile.id, label: 'Segure E para desmontar a sucata' };
 }
-function startSalvage() {
-  const pile = nearestPile();
-  if (pile === null || salvage || !me.alive || ended) return;
-  salvage = { pile, start: performance.now() };
-  send('salvageStart', { pile });
+function pressUse() {
+  const target = useTarget();
+  if (!target) return;
+  if (target.kind === 'door' || target.kind === 'exit') send('use');
+  else if (target.kind === 'portal') {
+    send('use');
+    leaveHold = { start: performance.now() };
+  } else if (!salvage) {
+    salvage = { pile: target.id, start: performance.now() };
+    send('salvageStart', { pile: target.id });
+  }
 }
-function stopSalvage() {
+function releaseUse() {
   salvage = null;
+  leaveHold = null;
 }
-function stepSalvage(now) {
-  const pile = nearestPile();
-  if (salvage && (pile !== salvage.pile || !me.alive)) salvage = null;
+function stepUse(now) {
+  const target = useTarget();
+  if (salvage && (target?.kind !== 'pile' || target.id !== salvage.pile)) salvage = null;
+  if (leaveHold && target?.kind !== 'portal') leaveHold = null;
   if (salvage && now - salvage.start >= SALVAGE_MS) {
     send('salvage', { pile: salvage.pile });
     salvage = null;
   }
-  $('prompt').hidden = pile === null || ended;
-  if (pile !== null) {
-    const progress = salvage ? Math.min(1, (now - salvage.start) / SALVAGE_MS) : 0;
-    $('prompt').innerHTML =
-      `Segure <b>E</b> para desmontar a sucata<div class="bar" style="width:${progress * 100}%"></div>`;
+  if (leaveHold && now - leaveHold.start >= LEAVE_MS) {
+    send('leave');
+    leaveHold = null;
+  }
+  $('prompt').hidden = !target;
+  if (target) {
+    const hold = salvage
+        ? (now - salvage.start) / SALVAGE_MS
+        : leaveHold
+          ? (now - leaveHold.start) / LEAVE_MS
+          : 0,
+      html = `${target.label.replace('E ', '<b>E</b> ')}<div class="bar" style="width:${Math.min(1, hold) * 100}%"></div>`;
+    $('prompt').innerHTML = html;
   }
 }
 
 // --- Entrada: teclado, botão direito/arrastar gira, joystick no celular ---
 addEventListener('keydown', e => {
-  if (e.key === 'Enter' && room && !ended) return openChat();
+  if (e.key === 'Enter' && view && !ended) return openChat();
   if (e.code === 'Space' && !e.repeat) startCharge();
-  if (e.code === 'KeyE' && !e.repeat) startSalvage();
+  if (e.code === 'KeyE' && !e.repeat) pressUse();
   keys.add(e.code);
   if (e.code === 'KeyF') lantern.visible = !lantern.visible;
-  if (e.code === 'KeyV') send('revive');
 });
 addEventListener('keyup', e => {
   if (e.code === 'Space') releaseShot();
-  if (e.code === 'KeyE') stopSalvage();
+  if (e.code === 'KeyE') releaseUse();
   keys.delete(e.code);
 });
 addEventListener('blur', () => keys.clear());
+document.addEventListener('visibilitychange', () => document.hidden && keys.clear());
 const canvas = renderer.domElement,
   drags = new Map();
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -439,15 +481,14 @@ for (const type of ['pointerup', 'pointercancel'])
     stick = { x: 0, y: 0 };
     knob.style.transform = '';
   });
-// Barra de ações: tocar/clicar faz o mesmo que a tecla; atirar e desmontar respeitam o segurar.
+// Barra de ações: tocar/clicar faz o mesmo que a tecla; atirar e "usar" respeitam o segurar.
 const holdActions = {
   fire: [startCharge, releaseShot],
-  use: [startSalvage, stopSalvage],
+  use: [pressUse, releaseUse],
 };
 const ACTIONS = {
   run: b => b.classList.toggle('on', (touchRun = !touchRun)),
   light: () => (lantern.visible = !lantern.visible),
-  revive: () => send('revive'),
   chat: () => openChat(),
 };
 for (const b of document.querySelectorAll('#actions button')) {
@@ -467,7 +508,7 @@ for (const b of document.querySelectorAll('#actions button')) {
     };
 }
 
-// --- Chat da equipe (mensagens da sala) ---
+// --- Chat da equipe ---
 function openChat() {
   $('chatInput').hidden = false;
   $('chatInput').focus();
@@ -477,7 +518,7 @@ $('chatInput').addEventListener('keydown', e => {
   e.stopPropagation();
   if (e.key === 'Enter') {
     const text = $('chatInput').value.trim();
-    if (text) send('chat', { text, messageId: crypto.randomUUID() });
+    if (text) send('chat', { text });
     $('chatInput').value = '';
   }
   if (e.key === 'Enter' || e.key === 'Escape') {
@@ -488,14 +529,16 @@ $('chatInput').addEventListener('keydown', e => {
 $('chatInput').addEventListener('keyup', e => e.stopPropagation());
 const seenMessages = new Set();
 function renderChat() {
-  const messages = (room.messages || []).slice(-8);
-  for (const m of messages) {
+  for (const m of view.messages) {
     if (seenMessages.has(m.id)) continue;
     seenMessages.add(m.id);
     if (m.sender !== ticket.id) remotes.get(m.sender)?.say(m.text, performance.now());
   }
+  const key = view.messages.map(m => m.id).join();
+  if (key === $('chatLog').dataset.key) return;
+  $('chatLog').dataset.key = key;
   $('chatLog').replaceChildren(
-    ...messages.map(m => {
+    ...view.messages.map(m => {
       const li = document.createElement('li'),
         who = document.createElement('b');
       who.textContent = m.name + ': ';
@@ -507,7 +550,7 @@ function renderChat() {
 }
 
 // --- Simulação local (o servidor confere velocidade e paredes) ---
-const open = (x, y) => world.grid[Math.floor(y)]?.[Math.floor(x)] === 0;
+const open = (x, y) => zoneGrid[Math.floor(y)]?.[Math.floor(x)] === 0;
 const free = (x, y) =>
   open(x - RADIUS, y - RADIUS) &&
   open(x + RADIUS, y - RADIUS) &&
@@ -535,12 +578,13 @@ function stepSelf(dt, now) {
     if (free(nx, me.y)) me.x = nx;
     if (free(me.x, ny)) me.y = ny;
   }
-  // 30 Hz andando; 1 Hz parado, para o servidor saber que a equipe continua ali.
+  // 30 Hz andando; 1 Hz parado, para o servidor saber que você continua ali.
   const state = `${me.x.toFixed(2)}|${me.y.toFixed(2)}|${me.a.toFixed(2)}`;
-  if (!ended && now - lastSend >= (state !== lastSent ? SEND_MS : IDLE_SEND_MS)) {
+  if (!ended && me.alive && now - lastSend >= (state !== lastSent ? SEND_MS : IDLE_SEND_MS)) {
     lastSend = now;
     lastSent = state;
-    if (ws?.readyState === 1) ws.send(JSON.stringify({ ...payload(), action: 'sync' }));
+    if (ws?.readyState === 1)
+      ws.send(JSON.stringify({ action: 'sync', seq: ++seq, x: me.x, y: me.y, a: me.a }));
   }
   $('staminaFill').style.width = me.stamina + '%';
   camera.position.set(me.x * S, EYE + (speed ? Math.abs(Math.sin(now / 160)) * 0.04 : 0), me.y * S);
@@ -550,33 +594,46 @@ function stepSelf(dt, now) {
     camera.rotation.y += (Math.random() - 0.5) * shake * 0.1;
     shake = Math.max(0, shake - dt * 1.5);
   }
-  // Coice do braço e brilho/mira crescendo enquanto carrega.
+  // Coice do braço; cor pelo nível (muda no 4, 7 e 10) e brilho/mira crescendo ao carregar.
   recoil = Math.max(0, recoil - dt * 6);
   arm.position.z = -0.45 + recoil * 0.06;
   const charge = chargeStart ? Math.min(1, (now - chargeStart) / FIRE.charged.chargeMs) : 0;
-  // Cor do canhão pelo nível do braço (muda no 4, 7 e 10); carregando, puxa para o vermelho.
   cannonGlow.color.set(cannonColor(me.armLevel || 1)).lerp(chargedColor, charge);
   muzzle.scale.setScalar(1 + charge * 0.35 + (charge === 1 ? Math.sin(now / 40) * 0.05 : 0));
   $('crosshair').style.transform = `scale(${1 + charge * 3})`;
   $('crosshair').classList.toggle('charged', charge === 1);
 }
 
-let last = performance.now();
-let frameStart = performance.now();
+let last = performance.now(),
+  frameStart = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   const frameMs = now - frameStart;
   frameStart = now;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (room && world) {
+  if (view && zoneGrid) {
     stepSelf(dt, now);
-    level.update(room, now / 1000);
+    stepUse(now);
     effects.update(dt);
-    stepSalvage(now);
-    level.moveEnemy(room.enemy, dt);
-    // Zumbido mais forte embaixo das luminárias.
-    hum.set(1 - Math.min(1, level.nearestLamp(me.x * S, me.y * S) / 5));
+    if (level) {
+      // O construtor do interior espera fusíveis (missões chegam na etapa 4): todos escondidos.
+      level.update(
+        {
+          fuses: zoneWorld.fuses.map(() => true),
+          collectedCoins: view.collectedCoins,
+          enemy: view.enemy,
+          loot: view.loot,
+        },
+        now / 1000,
+      );
+      if (view.enemy) level.moveEnemy(view.enemy, dt);
+      hum.set(1 - Math.min(1, level.nearestLamp(me.x * S, me.y * S) / 5));
+    } else {
+      campScene?.update(now / 1000);
+      // No acampamento, o zumbido vem do gerador.
+      hum.set(1 - Math.min(1, Math.hypot(me.x - GENERATOR.x - 1, me.y - GENERATOR.y - 1) / 10));
+    }
     for (const [id, avatar] of remotes) {
       const s = buffer.sample(id, now);
       if (!s) continue;
@@ -584,7 +641,7 @@ function frame(now) {
       avatar.root.rotation.y = s.yaw;
       avatar.update(dt, { speed: s.anim === 'down' ? 0 : s.speed, anim: s.anim }, now);
     }
-    const seconds = Math.max(0, Math.floor((Date.now() - room.started) / 1000));
+    const seconds = Math.max(0, Math.floor((view.now - view.startedAt) / 1000));
     $('clock').textContent =
       `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   }
@@ -594,5 +651,22 @@ function frame(now) {
   stats.end(frameMs, now);
 }
 requestAnimationFrame(frame);
+// Testes automatizados (localStorage backrooms.debug = 1): movem o jogador sem teclado.
+try {
+  if (localStorage.getItem('backrooms.debug') === '1')
+    window.expeditionDebug = {
+      me,
+      pressUse,
+      releaseUse,
+      view: () => view,
+      // Move e já avisa o servidor (sem esperar um quadro, que pode estar pausado).
+      goto(x, y) {
+        Object.assign(me, { x, y });
+        if (ws?.readyState === 1)
+          ws.send(JSON.stringify({ action: 'sync', seq: ++seq, x, y, a: me.a }));
+      },
+      leave: () => send('leave'),
+    };
+} catch {}
 setupLandscape();
-void start();
+start();

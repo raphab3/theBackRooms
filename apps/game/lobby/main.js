@@ -455,6 +455,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
+document.addEventListener('visibilitychange', () => document.hidden && keys.clear());
 
 const raycaster = new THREE.Raycaster(),
   drags = new Map();

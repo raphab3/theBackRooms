@@ -29,6 +29,16 @@ function roomSocket(request, env, url) {
   return roomStub(env, code).fetch(request);
 }
 
+// GET /api/world/:code/ws — expedição do mundo aberto.
+function worldSocket(request, env, url) {
+  if (!env.WORLDS) throw new ApiError('Expedições indisponíveis neste momento.', 503);
+  if (request.headers.get('Upgrade') !== 'websocket')
+    throw new ApiError('Use uma conexão WebSocket.', 426);
+  const origin = request.headers.get('Origin');
+  if (origin && origin !== url.origin) throw new ApiError('Origem não permitida.', 403);
+  return env.WORLDS.get(env.WORLDS.idFromName(url.pathname.split('/')[3])).fetch(request);
+}
+
 async function api(request, env) {
   try {
     const url = new URL(request.url);
@@ -36,6 +46,8 @@ async function api(request, env) {
       return await roomSocket(request, env, url);
     if (request.method === 'GET' && /^\/api\/lobby\/[^/]+\/ws$/.test(url.pathname))
       return await lobbySocket(request, env, url);
+    if (request.method === 'GET' && /^\/api\/world\/[A-Z2-9]{6}\/ws$/.test(url.pathname))
+      return await worldSocket(request, env, url);
     const admin = url.pathname.startsWith('/api/admin/');
     if (admin) await requireAccess(request, env);
     if (request.method !== 'POST') throw new ApiError('Método não permitido.', 405);

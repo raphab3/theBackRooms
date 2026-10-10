@@ -76,4 +76,27 @@ async function saveExpedition(db, room, now) {
   return true;
 }
 
-export { hashKey, inventoryApi, readInventory, saveExpedition };
+/** Crédito individual (saída pelo portal do mundo aberto), idempotente pelo id. */
+async function creditPlayer(db, { id, code, keyHash, items, startedAt }) {
+  const now = Date.now(),
+    inserted = await db
+      .prepare(
+        "INSERT OR IGNORE INTO expeditions(id,room_code,level,result,duration_ms,loot,created_at) VALUES(?,?,'camp','left',?,?,?)",
+      )
+      .bind(id, code, Math.max(0, now - startedAt), JSON.stringify(items), now)
+      .run();
+  if (!inserted.meta.changes) return false;
+  const credits = Object.entries(items)
+    .filter(([item, qty]) => item in ITEMS && Number.isSafeInteger(qty) && qty > 0)
+    .map(([item, qty]) =>
+      db
+        .prepare(
+          'INSERT INTO inventories(key_hash,item,qty) VALUES(?,?,?) ON CONFLICT(key_hash,item) DO UPDATE SET qty=qty+excluded.qty',
+        )
+        .bind(keyHash, item, qty),
+    );
+  if (credits.length) await db.batch(credits);
+  return true;
+}
+
+export { creditPlayer, hashKey, inventoryApi, readInventory, saveExpedition };

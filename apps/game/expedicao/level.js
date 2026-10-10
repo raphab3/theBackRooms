@@ -8,7 +8,8 @@ import { carpet, ceilingTiles, wallpaper } from '../lobby/scene.js';
 export const S = 2; // metros por célula
 export const WALL_HEIGHT = 2.7;
 
-export function buildLevel(scene, world) {
+/** Monta o interior dentro de `root` (desmontável ao trocar de zona); névoa e fundo vão na cena. */
+export function buildLevel(root, world, scene) {
   const grid = world.grid,
     n = grid.length,
     open = (x, y) => grid[y]?.[x] === 0;
@@ -21,7 +22,7 @@ export function buildLevel(scene, world) {
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((n * S) / 2, 0, (n * S) / 2);
-  scene.add(floor);
+  root.add(floor);
   const ceilingMap = ceilingTiles();
   ceilingMap.repeat.set(n * 2, n * 2);
   const ceiling = new THREE.Mesh(
@@ -30,7 +31,7 @@ export function buildLevel(scene, world) {
   );
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.set((n * S) / 2, WALL_HEIGHT, (n * S) / 2);
-  scene.add(ceiling);
+  root.add(ceiling);
 
   // Só as células sólidas que encostam num corredor viram parede: o miolo nunca é visto.
   const wallMap = wallpaper();
@@ -57,7 +58,7 @@ export function buildLevel(scene, world) {
   walls.forEach(([x, y], i) =>
     wallMesh.setMatrixAt(i, m.makeTranslation((x + 0.5) * S, WALL_HEIGHT / 2, (y + 0.5) * S)),
   );
-  scene.add(wallMesh);
+  root.add(wallMesh);
 
   // Luminárias: uma a cada poucas células abertas, algumas apagadas (sorteio fixo pela posição).
   const lamps = [];
@@ -80,14 +81,14 @@ export function buildLevel(scene, world) {
     new Float32Array(lamps.length * 3).fill(1),
     3,
   );
-  scene.add(lampMesh);
+  root.add(lampMesh);
   // Algumas luminárias piscam (escolha fixa pela posição, igual para todos).
   const flickering = lamps
       .map(([x, y], i) => ((x * 3 + y * 5) % 7 === 0 ? i : -1))
       .filter(i => i >= 0),
     lampColor = new THREE.Color();
 
-  scene.add(new THREE.HemisphereLight(0xfff1c2, 0x3a2f12, 1.3));
+  root.add(new THREE.HemisphereLight(0xfff1c2, 0x3a2f12, 1.3));
   scene.fog = new THREE.Fog(0x8f8247, 2, 22);
   scene.background = new THREE.Color(0x8f8247);
 
@@ -103,7 +104,7 @@ export function buildLevel(scene, world) {
     light.position.y = 0.2;
     fuse.add(light);
     fuse.position.set(f.x * S, 1, f.y * S);
-    scene.add(fuse);
+    root.add(fuse);
     return fuse;
   });
 
@@ -113,7 +114,7 @@ export function buildLevel(scene, world) {
     new THREE.MeshBasicMaterial({ color: 0xe8c547 }),
     world.coins.length,
   );
-  scene.add(coinMesh);
+  root.add(coinMesh);
   const coinPos = new THREE.Vector3(),
     coinTurn = new THREE.Quaternion(),
     coinEuler = new THREE.Euler(),
@@ -129,7 +130,7 @@ export function buildLevel(scene, world) {
   );
   exit.add(door);
   exit.position.set(world.exit.x * S, 1.05, world.exit.y * S);
-  scene.add(exit);
+  root.add(exit);
 
   // A entidade: vulto alto e escuro com olhos que brilham.
   const enemy = new THREE.Group(),
@@ -146,7 +147,7 @@ export function buildLevel(scene, world) {
     enemy.add(eye);
   }
   enemy.position.set(world.enemy.x * S, 0, world.enemy.y * S);
-  scene.add(enemy);
+  root.add(enemy);
   // Barra de vida sobre a entidade (só aparece depois do primeiro dano).
   const hpBar = document.createElement('div'),
     hpFill = document.createElement('div');
@@ -202,7 +203,7 @@ export function buildLevel(scene, world) {
     }
     g.position.set(item.x * S, 0, item.y * S);
     g.userData.kind = kind;
-    scene.add(g);
+    root.add(g);
     return g;
   }
   function syncLoot(loot) {
@@ -221,7 +222,7 @@ export function buildLevel(scene, world) {
     for (const [key, g] of lootMeshes)
       if (!seen.has(key)) {
         g.traverse(o => o.element?.remove());
-        scene.remove(g);
+        root.remove(g);
         lootMeshes.delete(key);
       }
   }
