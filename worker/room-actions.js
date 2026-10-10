@@ -12,7 +12,17 @@ import {
   validatedMode,
 } from './rooms.js';
 
-const ROOM_ACTIONS = ['join', 'sync', 'start', 'leave', 'revive', 'level', 'mode', 'chat'];
+const ROOM_ACTIONS = [
+  'join',
+  'sync',
+  'start',
+  'leave',
+  'revive',
+  'level',
+  'mode',
+  'chat',
+  'resume',
+];
 
 function join(room, body, now) {
   const p = newPlayer(nameOf(body), now);
@@ -31,6 +41,8 @@ function playerAction(room, action, body, now) {
   const p = authorize(room, body),
     previousSeen = p.seen;
   p.seen = now;
+  // Quem chega pelo portal do lobby já está na sala: só confirma a sessão e recebe o estado.
+  if (action === 'resume') return { id: p.id, token: p.token };
   if (action === 'chat') {
     const text =
       typeof body.text === 'string' ? body.text.replace(/[\x00-\x1f\x7f]/g, ' ').trim() : '';

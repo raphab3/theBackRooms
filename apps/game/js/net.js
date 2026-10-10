@@ -118,21 +118,50 @@ async function connectRoom(action) {
       mode: selectedMode,
       campaign: true,
     });
-    net = {
-      id: data.id,
-      token: data.token,
-      code: data.room.code,
-      connected: true,
-      dead: false,
-      room: data.room,
-    };
-    netSeq = 0;
-    sceneRound = -1;
-    remotePlayers = [];
-    remoteBuffer.clear();
-    applySnapshot(data, true);
-    if (data.room.status === 'lobby') showLobby();
-    openSocket();
+    enterRoom(data);
+  } catch (e) {
+    $('homeError').textContent = e.message;
+  } finally {
+    busyHome(false);
+  }
+}
+function enterRoom(data) {
+  net = {
+    id: data.id,
+    token: data.token,
+    code: data.room.code,
+    connected: true,
+    dead: false,
+    room: data.room,
+  };
+  netSeq = 0;
+  sceneRound = -1;
+  remotePlayers = [];
+  remoteBuffer.clear();
+  applySnapshot(data, true);
+  if (data.room.status === 'lobby') showLobby();
+  openSocket();
+}
+// Chegada pelo portal do lobby 3D: /#travel={code,id,token,name} entra direto na partida.
+async function resumeTravel() {
+  const raw = new URLSearchParams((location.hash || '').slice(1)).get('travel');
+  if (!raw) return;
+  window.history.replaceState(null, '', location.pathname + location.search);
+  let travel;
+  try {
+    travel = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  $('nickname').value = travel.name || '';
+  busyHome(true);
+  try {
+    const data = await requestRoom('resume', {
+      code: travel.code,
+      id: travel.id,
+      token: travel.token,
+    });
+    enterRoom(data);
   } catch (e) {
     $('homeError').textContent = e.message;
   } finally {
@@ -562,6 +591,7 @@ function setupNet() {
   $('roomCode').addEventListener('keydown', e => {
     if (e.key === 'Enter') connectRoom('join');
   });
+  void resumeTravel();
 }
 
 export {

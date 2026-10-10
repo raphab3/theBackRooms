@@ -1,28 +1,16 @@
-import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
+import { PHASE_ORDER } from '@backrooms/shared/world.js';
 import { adminApi, requireAccess } from './admin.js';
 import { globalChat } from './chat.js';
+import { createRoom, roomRequest, roomStub } from './expeditions.js';
 import { ApiError, dbFor, json } from './http.js';
 import { globalLeaderboard } from './leaderboard.js';
+import { lobbyApi, lobbySocket } from './lobby-api.js';
 import { customMapsApi } from './maps.js';
 import { nameOf, newPlayer } from './players.js';
 import { explorerProfile } from './profiles.js';
 import { ROOM_ACTIONS } from './room-actions.js';
 import { validatedLevel, validatedMode } from './rooms.js';
 
-function roomStub(env, code) {
-  if (!env.ROOMS) throw new ApiError('Salas indisponíveis neste momento. Tente novamente.', 503);
-  return env.ROOMS.get(env.ROOMS.idFromName(code));
-}
-// Encaminha uma requisição interna (/init, /action, /state) ao Durable Object da sala.
-function roomRequest(env, code, path, payload) {
-  return roomStub(env, code).fetch(
-    new Request('https://room.internal' + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
-  );
-}
 async function roomState(env, code) {
   if (typeof code !== 'string') throw new ApiError('Sala não encontrada.', 404);
   const response = await roomRequest(env, code, '/state', {});
@@ -44,6 +32,8 @@ async function api(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && /^\/api\/rooms\/[A-Za-z2-9]{6}\/ws$/.test(url.pathname))
       return await roomSocket(request, env, url);
+    if (request.method === 'GET' && /^\/api\/lobby\/[^/]+\/ws$/.test(url.pathname))
+      return await lobbySocket(request, env, url);
     const admin = url.pathname.startsWith('/api/admin/');
     if (admin) await requireAccess(request, env);
     if (request.method !== 'POST') throw new ApiError('Método não permitido.', 405);
@@ -78,6 +68,7 @@ async function api(request, env) {
           },
         }),
       );
+    if (url.pathname.startsWith('/api/lobby/')) return json(await lobbyApi(env, action, body));
     if (url.pathname.startsWith('/api/maps/')) return json(await customMapsApi(db, action, body));
     if (url.pathname.startsWith('/api/profiles/'))
       return json(await explorerProfile(db, action, body));
@@ -85,53 +76,13 @@ async function api(request, env) {
       return json(await globalLeaderboard(db, action, body, code => roomState(env, code)));
     if (url.pathname.startsWith('/api/global/')) return json(await globalChat(db, action, body));
     if (action === 'create') {
-      const name = nameOf(body),
-        now = Date.now(),
-        p = newPlayer(name, now),
-        seed = crypto.getRandomValues(new Uint32Array(1))[0],
-        level = body.campaign ? PHASE_ORDER[0] : validatedLevel(body.level),
-        mode = validatedMode(body.mode),
-        world = createWorld(seed, level);
-      let code;
-      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      for (let i = 0; i < 5; i++) {
-        code = Array.from(
-          crypto.getRandomValues(new Uint8Array(6)),
-          n => alphabet[n % alphabet.length],
-        ).join('');
-        const room = {
-          code,
-          seed,
-          level,
-          mode,
+      const p = newPlayer(nameOf(body), Date.now()),
+        room = await createRoom(env, [p], {
+          level: body.campaign ? PHASE_ORDER[0] : validatedLevel(body.level),
+          mode: validatedMode(body.mode),
           campaign: body.campaign === true,
-          world,
-          coinRespawns: {},
-          smile: mode === 'hardcore' ? { ...world.smile } : null,
-          players: [p],
-          host: p.id,
-          status: 'lobby',
-          round: 0,
-          started: 0,
-          lastTick: now,
-          balance: 0,
-          collectedCoins: [],
-          fuses: world.fuses.map(() => false),
-          enemy: { ...world.enemy },
-        };
-        const response = await roomRequest(env, code, '/init', { room });
-        if (response.ok) {
-          await db
-            .prepare(
-              "INSERT INTO rooms(code,state,updated_at) VALUES(?,'{}',?) ON CONFLICT(code) DO UPDATE SET updated_at=excluded.updated_at",
-            )
-            .bind(code, now)
-            .run();
-          return json({ id: p.id, token: p.token, room: (await response.json()).room });
-        }
-        if (response.status !== 409) return response;
-      }
-      throw new ApiError('Não foi possível criar a sala. Tente novamente.', 503);
+        });
+      return json({ id: p.id, token: p.token, room });
     }
     const code = typeof body.code === 'string' ? body.code.toUpperCase().trim() : '';
     if (!/^[A-Z2-9]{6}$/.test(code)) throw new ApiError('Digite o código de 6 caracteres da sala.');

@@ -23,8 +23,15 @@
     },
   ],
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "RoomDO" }],
+    "bindings": [
+      { "name": "ROOMS", "class_name": "RoomDO" },
+      { "name": "LOBBIES", "class_name": "LobbyDO" },
+      { "name": "LOBBY_DIRECTORY", "class_name": "LobbyDirectoryDO" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RoomDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["LobbyDO", "LobbyDirectoryDO"] },
+  ],
   "analytics_engine_datasets": [{ "binding": "TELEMETRY", "dataset": "backrooms_telemetry" }],
 }

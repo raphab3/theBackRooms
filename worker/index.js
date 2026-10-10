@@ -2,6 +2,7 @@
 import { api } from './api.js';
 
 export { api };
+export { LobbyDirectoryDO, LobbyDO } from './lobby-do.js';
 export { RoomDO } from './room-do.js';
 
 export default {

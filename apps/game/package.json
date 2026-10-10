@@ -8,7 +8,8 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@backrooms/shared": "workspace:*"
+    "@backrooms/shared": "workspace:*",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "vite": "^7.0.0"

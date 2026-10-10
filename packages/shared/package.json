@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./world.js": "./world.js"
+    "./world.js": "./world.js",
+    "./lobby.js": "./lobby.js"
   }
 }
