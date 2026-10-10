@@ -388,3 +388,47 @@ button.primary {
     right: 12px;
   }
 }
+
+#prompt {
+  left: 50%;
+  top: 62%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-size: 14px;
+}
+#station h2 {
+  margin: 0;
+  text-align: center;
+}
+.arm {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #4a4428;
+}
+.arm .icon {
+  font-size: 24px;
+}
+.arm small,
+.stat small {
+  color: var(--muted);
+}
+.stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+.stat b.up {
+  color: #8ee08e;
+}
+.cost {
+  margin: 8px 0;
+  text-align: center;
+}
+.cost .missing {
+  color: var(--danger);
+}

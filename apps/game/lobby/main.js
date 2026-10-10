@@ -9,7 +9,15 @@ import { deviceKey, readHome, saveHome } from './identity.js';
 import { enterLandscape, setupLandscape } from './landscape.js';
 import { bindQualitySelect, createPipeline } from './quality.js';
 import { createStats } from './stats.js';
-import { PILLARS, PILLAR_RADIUS, animateLobby, buildLobby } from './scene.js';
+import { ARMS, almondSaveChance, damageMultiplier, upgradeCost } from '@backrooms/shared/arms.js';
+import {
+  PILLARS,
+  PILLAR_RADIUS,
+  STATIONS,
+  STATION_REACH,
+  animateLobby,
+  buildLobby,
+} from './scene.js';
 
 const $ = id => document.getElementById(id);
 const NAME_KEY = 'backrooms.explorerName',
@@ -340,6 +348,88 @@ $('acceptInvite').onclick = () => {
 };
 $('declineInvite').onclick = () => ($('invite').hidden = true);
 
+// --- Estações do Posto Zero: bancada (evoluir o braço) e armeiro (braços) ---
+let openStationId = null;
+const nearStation = () =>
+  STATIONS.find(st => Math.hypot(st.x - me.x, st.z - me.z) <= STATION_REACH) ?? null;
+async function workshop(action, body = {}) {
+  const response = await fetch('/api/workshop/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: deviceKey(), ...body }),
+    }),
+    data = await response.json();
+  if (!response.ok) throw Error(data.error || 'A oficina não respondeu.');
+  return data;
+}
+async function openStation(id) {
+  openStationId = id;
+  keys.clear();
+  $('station').hidden = false;
+  $('stationError').textContent = '';
+  $('stationTitle').textContent = id === 'bench' ? 'Bancada' : 'Armeiro';
+  $('stationBody').textContent = 'Carregando…';
+  try {
+    renderStation(await workshop('get'));
+  } catch (e) {
+    $('stationError').textContent = e.message;
+  }
+}
+function closeStation() {
+  openStationId = null;
+  $('station').hidden = true;
+}
+function renderStation({ arms, items }) {
+  const body = $('stationBody'),
+    level = arms.fire;
+  if (openStationId === 'armory') {
+    body.innerHTML = Object.entries(ARMS)
+      .map(
+        ([id, arm]) =>
+          `<div class="arm"><span class="icon">${arm.icon}</span><span>${arm.name}<br><small>${
+            arm.soon ? 'Chega na Fase 3' : `Equipado · nível ${arms[id] || 1}`
+          }</small></span><span>${arm.soon ? '🔒' : '✅'}</span></div>`,
+      )
+      .join('');
+    return;
+  }
+  const max = level >= ARMS.fire.maxLevel,
+    next = level + 1,
+    cost = upgradeCost(level),
+    have = item => items[item] || 0,
+    enough = have('scrap') >= cost.scrap && have('core_fire') >= cost.core_fire,
+    pct = n => `${Math.round(n * 100)}%`;
+  body.innerHTML = `
+    <div class="arm"><span class="icon">🔥</span><span>Braço de Fogo<br><small>nível ${level} de ${ARMS.fire.maxLevel}</small></span><span></span></div>
+    <div class="stat"><small>Dano do tiro</small><span>${(10 * damageMultiplier(level)).toFixed(1)}${max ? '' : ` → <b class="up">${(10 * damageMultiplier(next)).toFixed(1)}</b>`}</span></div>
+    <div class="stat"><small>Chance de economizar Amêndoa</small><span>${pct(almondSaveChance(level))}${max ? '' : ` → <b class="up">${pct(almondSaveChance(next))}</b>`}</span></div>
+    ${
+      max
+        ? '<p class="cost">Nível máximo.</p>'
+        : `<p class="cost">Custo: <span class="${have('scrap') < cost.scrap ? 'missing' : ''}">🔩 ${have('scrap')}/${cost.scrap}</span> · <span class="${have('core_fire') < cost.core_fire ? 'missing' : ''}">🔥 ${have('core_fire')}/${cost.core_fire}</span></p>
+           <button id="upgrade" class="primary" ${enough ? '' : 'disabled'}>Evoluir para o nível ${next}</button>`
+    }`;
+  const button = $('upgrade');
+  if (button)
+    button.onclick = async () => {
+      button.disabled = true;
+      $('stationError').textContent = '';
+      try {
+        renderStation(await workshop('upgrade', { element: 'fire' }));
+        notice(`Braço de Fogo no nível ${next}!`);
+        void refreshStock($('nickname').value.trim() || 'Explorador');
+      } catch (e) {
+        $('stationError').textContent = e.message;
+        button.disabled = false;
+      }
+    };
+}
+$('stationClose').onclick = closeStation;
+function useStation() {
+  const station = nearStation();
+  if (station) void openStation(station.id);
+}
+
 // --- Entrada: teclado, mouse/toque para câmera, clique em jogador para convidar ---
 function emote(e) {
   socket?.send({ t: 'emote', e });
@@ -352,6 +442,11 @@ function jump() {
 }
 addEventListener('keydown', e => {
   if (!socket || document.activeElement === $('chatInput')) return;
+  if (openStationId) {
+    if (e.key === 'Escape' || e.code === 'KeyE') closeStation();
+    return;
+  }
+  if (e.code === 'KeyE') return useStation();
   if (e.key === 'Enter') return openChat();
   if (e.code === 'Space') jump();
   if (EMOTE_KEYS[e.code]) emote(EMOTE_KEYS[e.code]);
@@ -430,6 +525,7 @@ const ACTIONS = {
   point: () => emote('point'),
   dance: () => emote('dance'),
   chat: () => openChat(),
+  use: () => useStation(),
   party: () => socket?.send({ t: 'leaveParty' }),
 };
 for (const b of document.querySelectorAll('#actions button'))
@@ -442,11 +538,11 @@ for (const b of document.querySelectorAll('#actions button'))
 function collide() {
   me.x = Math.min(LOBBY_BOUNDS.maxX, Math.max(LOBBY_BOUNDS.minX, me.x));
   me.z = Math.min(LOBBY_BOUNDS.maxZ, Math.max(LOBBY_BOUNDS.minZ, me.z));
-  for (const p of PILLARS) {
+  for (const p of [...PILLARS, ...STATIONS]) {
     const dx = me.x - p.x,
       dz = me.z - p.z,
       dist = Math.hypot(dx, dz),
-      min = PILLAR_RADIUS + 0.35;
+      min = (p.radius ?? PILLAR_RADIUS) + 0.35;
     if (dist < min && dist > 0) {
       me.x = p.x + (dx / dist) * min;
       me.z = p.z + (dz / dist) * min;
@@ -491,6 +587,10 @@ function stepSelf(dt, now) {
     lastSent = state;
     socket?.send({ t: 'move', x: me.x, z: me.z, yaw: me.yaw, anim: me.anim });
   }
+  const station = nearStation();
+  $('prompt').hidden = !station || !!openStationId;
+  if (station)
+    $('prompt').textContent = `E — ${station.label === 'BANCADA' ? 'Bancada' : 'Armeiro'}`;
   self.root.position.set(me.x, 0, me.z);
   self.root.rotation.y = me.yaw;
   self.update(dt, { speed, anim: me.anim, emote: me.emote, emoteN: me.emoteN, jumpY: me.y }, now);

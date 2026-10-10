@@ -11,6 +11,12 @@ export const PILLARS = [
   { x: 10, z: -4 },
 ];
 export const PILLAR_RADIUS = 0.55;
+// Estações do Posto Zero: chegar perto e apertar E abre o painel.
+export const STATIONS = [
+  { id: 'bench', x: -15.5, z: 7, label: 'BANCADA', radius: 1 },
+  { id: 'armory', x: 15.5, z: 7, label: 'ARMEIRO', radius: 1 },
+];
+export const STATION_REACH = 2.4;
 const LEVEL_NAMES = { backrooms: 'NÍVEL 0 · BACKROOMS' };
 
 // Textura de canvas com ruído determinístico, para não piscar entre recargas.
@@ -248,7 +254,50 @@ export function animateLobby(t) {
   lobbyPanel.instanceColor.needsUpdate = true;
 }
 
+function buildStations(scene) {
+  const wood = new THREE.MeshLambertMaterial({ color: 0x6b4a2b }),
+    steel = new THREE.MeshLambertMaterial({ color: 0x777d84 }),
+    glow = new THREE.MeshBasicMaterial({ color: 0xff8a2a });
+  const part = (group, geo, mat, x, y, z) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+  };
+  for (const station of STATIONS) {
+    const g = new THREE.Group();
+    if (station.id === 'bench') {
+      // Bancada: tampo, pés, morsa e um braço-canhão sendo montado.
+      part(g, new THREE.BoxGeometry(1.2, 0.08, 2), wood, 0, 0.95, 0);
+      for (const [x, z] of [
+        [-0.5, -0.9],
+        [0.5, -0.9],
+        [-0.5, 0.9],
+        [0.5, 0.9],
+      ])
+        part(g, new THREE.BoxGeometry(0.08, 0.95, 0.08), steel, x, 0.47, z);
+      part(g, new THREE.BoxGeometry(0.3, 0.25, 0.3), steel, 0, 1.12, -0.6);
+      part(g, new THREE.BoxGeometry(0.16, 0.16, 0.7), steel, 0.1, 1.08, 0.3);
+      part(g, new THREE.BoxGeometry(0.2, 0.2, 0.18), glow, 0.1, 1.08, 0.72);
+    } else {
+      // Armeiro: armário com os braços pendurados (só o de Fogo aceso por enquanto).
+      part(g, new THREE.BoxGeometry(0.6, 2.4, 2.4), wood, 0, 1.2, 0);
+      [-0.8, -0.27, 0.27, 0.8].forEach((z, i) =>
+        part(g, new THREE.BoxGeometry(0.2, 0.7, 0.2), i === 0 ? glow : steel, -0.4, 1.4, z),
+      );
+    }
+    const tag = document.createElement('div');
+    tag.className = 'portalTag';
+    tag.innerHTML = `<b>${station.label}</b><br>chegue perto e aperte E`;
+    const label = new CSS2DObject(tag);
+    label.position.set(0, 2.9, 0);
+    g.add(label);
+    g.position.set(station.x, 0, station.z);
+    scene.add(g);
+  }
+}
+
 export function buildLobby(scene) {
   buildHall(scene);
+  buildStations(scene);
   return PORTALS.map(def => new Portal(scene, def));
 }

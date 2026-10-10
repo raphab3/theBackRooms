@@ -1,9 +1,11 @@
+import { almondSaveChance, damageMultiplier } from '@backrooms/shared/arms.js';
 import { FIRE, traceShot } from '@backrooms/shared/combat.js';
 import {
   PICKUP_REACH,
   SALVAGE_MS,
   SALVAGE_REACH,
   addItems,
+  countItem,
   removeItems,
 } from '@backrooms/shared/loot.js';
 import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
@@ -67,14 +69,18 @@ function playerAction(room, action, body, now) {
     // Recarga do braço: disparo cedo demais é ignorado sem erro (o cliente só não vê o tiro).
     if (now - (p.shotAt || 0) < spec.cooldownMs) return { hit: false, cooldown: true };
     // O tiro carregado gasta uma Amêndoa da mochila.
-    if (kind === 'charged' && !removeItems((p.bag ??= []), 'almond', 1))
-      throw new ApiError('Sem Amêndoa para o tiro carregado.', 409);
+    // O tiro carregado gasta uma Amêndoa (o braço evoluído às vezes economiza).
+    if (kind === 'charged') {
+      if (!countItem((p.bag ??= []), 'almond'))
+        throw new ApiError('Sem Amêndoa para o tiro carregado.', 409);
+      if (Math.random() >= almondSaveChance(p.armLevel || 1)) removeItems(p.bag, 'almond', 1);
+    }
     p.shotAt = now;
     // O tiro sai da posição que o servidor conhece; do cliente só vem a mira.
     const enemy = room.enemy,
       shot = traceShot(room.world.grid, p, body.a, enemy.dead ? null : enemy, kind);
     if (shot.hit) {
-      damageEnemy(room, spec.damage, now);
+      damageEnemy(room, spec.damage * damageMultiplier(p.armLevel || 1), now);
       if (kind === 'primary' && !enemy.dead) enemy.burnUntil = now + spec.burnMs;
     }
     room.effects = [

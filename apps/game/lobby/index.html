@@ -44,6 +44,7 @@
         </select></label
       >
       <div id="notice" role="status"></div>
+      <div id="prompt" hidden></div>
       <div id="teamSize" hidden>
         <span id="teamSizeText">Quantos no time?</span>
         <span id="teamSizeButtons">
@@ -66,11 +67,21 @@
         <button data-action="wave" title="Acenar (1)"><span>👋</span><kbd>1</kbd></button>
         <button data-action="point" title="Apontar (2)"><span>👉</span><kbd>2</kbd></button>
         <button data-action="dance" title="Dançar (3)"><span>💃</span><kbd>3</kbd></button>
+        <button data-action="use" title="Usar bancada/armeiro (E)">
+          <span>🔧</span><kbd>E</kbd>
+        </button>
         <button data-action="chat" title="Conversar (Enter)">
           <span>💬</span><kbd>Enter</kbd>
         </button>
         <button data-action="party" title="Sair do grupo (G)"><span>🚪</span><kbd>G</kbd></button>
       </div>
+    </section>
+
+    <section id="station" class="panel" hidden>
+      <h2 id="stationTitle"></h2>
+      <div id="stationBody"></div>
+      <p id="stationError" class="error" role="alert"></p>
+      <button id="stationClose">Fechar (Esc)</button>
     </section>
 
     <section id="travel" class="panel" hidden>

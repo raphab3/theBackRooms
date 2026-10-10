@@ -15,6 +15,7 @@ import {
 import { PHASE_ORDER } from '@backrooms/shared/world.js';
 import { createRoom } from './expeditions.js';
 import { hashKey } from './inventory.js';
+import { readArms } from './workshop.js';
 import { ApiError, json } from './http.js';
 import { colors, nameOf, newPlayer } from './players.js';
 
@@ -338,8 +339,19 @@ class LobbyDO {
     if (!group.length) return;
     const now = Date.now(),
       players = [];
-    for (const p of group)
-      players.push({ ...newPlayer(p.name, now, players), skin: p.skin, keyHash: p.keyHash });
+    for (const p of group) {
+      // O nível do braço vai junto para a partida (o servidor da sala calcula o dano com ele).
+      const armLevel =
+        p.keyHash && this.env.DB
+          ? (await readArms(this.env.DB, p.keyHash).catch(() => ({ fire: 1 }))).fire
+          : 1;
+      players.push({
+        ...newPlayer(p.name, now, players),
+        skin: p.skin,
+        keyHash: p.keyHash,
+        armLevel,
+      });
+    }
     try {
       const room = await createRoom(this.env, players, {
         level: level || PHASE_ORDER[0],

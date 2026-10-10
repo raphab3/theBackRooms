@@ -7,6 +7,7 @@
     "./world.js": "./world.js",
     "./lobby.js": "./lobby.js",
     "./combat.js": "./combat.js",
-    "./loot.js": "./loot.js"
+    "./loot.js": "./loot.js",
+    "./arms.js": "./arms.js"
   }
 }

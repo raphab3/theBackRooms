@@ -6,6 +6,7 @@ import { ApiError, dbFor, json } from './http.js';
 import { globalLeaderboard } from './leaderboard.js';
 import { inventoryApi } from './inventory.js';
 import { lobbyApi, lobbySocket } from './lobby-api.js';
+import { workshopApi } from './workshop.js';
 import { customMapsApi } from './maps.js';
 import { nameOf, newPlayer } from './players.js';
 import { explorerProfile } from './profiles.js';
@@ -72,6 +73,7 @@ async function api(request, env) {
     if (url.pathname.startsWith('/api/lobby/')) return json(await lobbyApi(env, action, body));
     if (url.pathname.startsWith('/api/inventory/'))
       return json(await inventoryApi(db, action, body));
+    if (url.pathname.startsWith('/api/workshop/')) return json(await workshopApi(db, action, body));
     if (url.pathname.startsWith('/api/maps/')) return json(await customMapsApi(db, action, body));
     if (url.pathname.startsWith('/api/profiles/'))
       return json(await explorerProfile(db, action, body));

@@ -2,6 +2,7 @@
 // Chega pelo portal do lobby com #travel={code,id,token,name}; no fim, volta ao lobby.
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { cannonColor } from '@backrooms/shared/arms.js';
 import { FIRE, traceShot } from '@backrooms/shared/combat.js';
 import { ITEMS, SALVAGE_MS, SALVAGE_REACH, countItem } from '@backrooms/shared/loot.js';
 import { createWorld } from '@backrooms/shared/world.js';
@@ -59,6 +60,7 @@ muzzle.position.z = -0.17;
 arm.add(muzzle);
 arm.position.set(0.2, -0.17, -0.45);
 camera.add(arm);
+const chargedColor = new THREE.Color(0xff3a10);
 const effects = createEffects(scene),
   sfx = createSfx(),
   seenEffects = new Set();
@@ -202,6 +204,7 @@ function applyRoom(next, first = false) {
       }
     myBag = self.bag || [];
     me.carrying = self.carrying || 0;
+    me.armLevel = self.armLevel || 1;
   }
   buffer.push(
     performance.now(),
@@ -551,7 +554,8 @@ function stepSelf(dt, now) {
   recoil = Math.max(0, recoil - dt * 6);
   arm.position.z = -0.45 + recoil * 0.06;
   const charge = chargeStart ? Math.min(1, (now - chargeStart) / FIRE.charged.chargeMs) : 0;
-  cannonGlow.color.setRGB(1, 0.54 - charge * 0.35, 0.16 - charge * 0.16);
+  // Cor do canhão pelo nível do braço (muda no 4, 7 e 10); carregando, puxa para o vermelho.
+  cannonGlow.color.set(cannonColor(me.armLevel || 1)).lerp(chargedColor, charge);
   muzzle.scale.setScalar(1 + charge * 0.35 + (charge === 1 ? Math.sin(now / 40) * 0.05 : 0));
   $('crosshair').style.transform = `scale(${1 + charge * 3})`;
   $('crosshair').classList.toggle('charged', charge === 1);
