@@ -3,6 +3,10 @@
   "name": "backrooms",
   "main": "worker/index.js",
   "compatibility_date": "2026-10-01",
+  // Publicado em backrooms.buracoonline.com (a raiz do domínio é outro site, na Vercel).
+  "routes": [{ "pattern": "backrooms.buracoonline.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
   "assets": {
     "directory": "apps/game/dist",
     "binding": "ASSETS",
@@ -17,8 +21,7 @@
     {
       "binding": "DB",
       "database_name": "backrooms",
-      // Troque pelo id exibido em `pnpm exec wrangler d1 create backrooms` antes do primeiro deploy.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "bbea1666-34ad-4696-86c8-ea29fdfd9c80",
       "migrations_dir": "drizzle",
     },
   ],
@@ -33,5 +36,7 @@
     { "tag": "v1", "new_sqlite_classes": ["RoomDO"] },
     { "tag": "v2", "new_sqlite_classes": ["LobbyDO", "LobbyDirectoryDO"] },
   ],
-  "analytics_engine_datasets": [{ "binding": "TELEMETRY", "dataset": "backrooms_telemetry" }],
+  // Telemetria (worker/telemetry.js) desligada até ativar o Analytics Engine no painel da conta;
+  // sem o binding ela não faz nada. Para ligar, descomente:
+  // "analytics_engine_datasets": [{ "binding": "TELEMETRY", "dataset": "backrooms_telemetry" }],
 }

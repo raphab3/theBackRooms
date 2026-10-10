@@ -3,6 +3,8 @@
 Documento de visão completo (história, gameplay, Braço-Arma, arquitetura):
 https://claude.ai/code/artifact/d9d06fd0-390a-4f1e-b250-81098bb7bd21
 
+**No ar:** https://backrooms.buracoonline.com (lobby em `/lobby/`). Publicar: `pnpm release`.
+
 As specs de cada fase estão no specgate, workspace **TheBackRooms** (`proj-e38fn1c`).
 
 ## Objetivo
