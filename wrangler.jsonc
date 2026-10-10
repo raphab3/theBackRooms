@@ -17,4 +17,5 @@
       "migrations_dir": "drizzle",
     },
   ],
+  "analytics_engine_datasets": [{ "binding": "TELEMETRY", "dataset": "backrooms_telemetry" }],
 }
