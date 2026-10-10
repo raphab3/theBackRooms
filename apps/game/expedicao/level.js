@@ -1,6 +1,8 @@
 // Nível 0 em 3D a partir da grade de world.js: paredes instanciadas, fusíveis, moedas, saída e a
 // entidade. Coordenadas do mundo: célula (x, y) da grade → (x·S, 0, y·S) em metros.
 import * as THREE from 'three';
+import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { ENEMY_HP } from '@backrooms/shared/combat.js';
 import { carpet, ceilingTiles, wallpaper } from '../lobby/scene.js';
 
 export const S = 2; // metros por célula
@@ -145,6 +147,14 @@ export function buildLevel(scene, world) {
   }
   enemy.position.set(world.enemy.x * S, 0, world.enemy.y * S);
   scene.add(enemy);
+  // Barra de vida sobre a entidade (só aparece depois do primeiro dano).
+  const hpBar = document.createElement('div'),
+    hpFill = document.createElement('div');
+  hpBar.className = 'hpBar';
+  hpBar.append(hpFill);
+  const hpLabel = new CSS2DObject(hpBar);
+  hpLabel.position.y = 2.5;
+  enemy.add(hpLabel);
 
   return {
     update(room, t) {
@@ -163,6 +173,16 @@ export function buildLevel(scene, world) {
         coinMesh.setMatrixAt(i, m.compose(coinPos, coinTurn, hidden.has(c.id) ? zero : one));
       });
       coinMesh.instanceMatrix.needsUpdate = true;
+      // Entidade: some ao morrer; queimando, brilha em laranja; vida na barra.
+      const foe = room.enemy;
+      enemy.visible = !foe.dead;
+      hpBar.hidden = foe.dead || foe.hp >= ENEMY_HP;
+      hpFill.style.width = `${(100 * foe.hp) / ENEMY_HP}%`;
+      shadow.emissive.setRGB(
+        foe.burning ? 0.6 + Math.sin(t * 30) * 0.3 : 0,
+        foe.burning ? 0.2 : 0,
+        0,
+      );
       for (const i of flickering) {
         const v = Math.sin(t * 7 + i * 13) * Math.sin(t * 1.3 + i);
         lampMesh.setColorAt(i, lampColor.setScalar(v > 0.8 ? 0.12 : 1));

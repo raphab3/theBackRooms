@@ -2,12 +2,14 @@
 // Chega pelo portal do lobby com #travel={code,id,token,name}; no fim, volta ao lobby.
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { FIRE, traceShot } from '@backrooms/shared/combat.js';
 import { createWorld } from '@backrooms/shared/world.js';
 import { Avatar } from '../lobby/avatar.js';
 import { createHum } from '../lobby/hum.js';
 import { RemoteBuffer } from '../lobby/net.js';
 import { bindQualitySelect, createPipeline } from '../lobby/quality.js';
 import { createStats } from '../lobby/stats.js';
+import { createEffects, createSfx } from './effects.js';
 import { S, buildLevel } from './level.js';
 
 const $ = id => document.getElementById(id);
@@ -41,6 +43,27 @@ const lantern = new THREE.SpotLight(0xfff4d8, 18, 16, 0.5, 0.45, 1.4);
 lantern.position.set(0.15, -0.15, 0);
 lantern.target.position.set(0, 0, -1);
 camera.add(lantern, lantern.target);
+// Braço-Arma em primeira pessoa: manga, antebraço e o canhão que brilha ao carregar.
+const arm = new THREE.Group(),
+  cannonGlow = new THREE.MeshBasicMaterial({ color: 0xff8a2a });
+arm.add(
+  new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.06, 0.28),
+    new THREE.MeshLambertMaterial({ color: 0x6d737b }),
+  ),
+);
+const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.085, 0.08), cannonGlow);
+muzzle.position.z = -0.17;
+arm.add(muzzle);
+arm.position.set(0.2, -0.17, -0.45);
+camera.add(arm);
+const effects = createEffects(scene),
+  sfx = createSfx(),
+  seenEffects = new Set();
+let chargeStart = 0,
+  recoil = 0,
+  shake = 0,
+  lastShot = 0;
 const pipeline = createPipeline(renderer, scene, camera),
   hum = createHum();
 bindQualitySelect($('quality'), pipeline);
@@ -119,6 +142,12 @@ async function start() {
     applyRoom(data.room, true);
     world = createWorld(room.seed, room.level);
     level = buildLevel(scene, world);
+    // O servidor nasce todo mundo com ângulo 0; vira para o primeiro corredor aberto.
+    const cell = (dx, dy) => world.grid[Math.floor(me.y) + dy]?.[Math.floor(me.x) + dx] === 0;
+    me.a =
+      [0, Math.PI / 2, Math.PI, -Math.PI / 2].find(a =>
+        cell(Math.round(Math.cos(a)), Math.round(Math.sin(a))),
+      ) ?? 0;
     pipeline.warm();
     connect();
     $('loading').hidden = true;
@@ -175,6 +204,19 @@ function applyRoom(next, first = false) {
   );
   syncRemotes();
   renderHud();
+  // Tiros dos colegas (os meus já foram desenhados na hora do clique).
+  for (const e of room.effects || []) {
+    if (seenEffects.has(e.id)) continue;
+    seenEffects.add(e.id);
+    if (e.by === ticket.id || !level) continue;
+    effects.fire(
+      new THREE.Vector3(e.from.x * S, 1.3, e.from.y * S),
+      new THREE.Vector3(e.to.x * S, 1.3, e.to.y * S),
+      e.kind === 'charged',
+    );
+    sfx.shot(e.kind === 'charged');
+  }
+  if (seenEffects.size > 200) seenEffects.clear();
   if ((room.status === 'won' || room.status === 'lost') && !ended) finish(room.status === 'won');
 }
 
@@ -236,18 +278,53 @@ function backToLobby() {
 }
 $('backLobby').onclick = backToLobby;
 
+// --- Braço de Fogo: clique (ou espaço) atira; segurar 1,2 s carrega o tiro ---
+function startCharge() {
+  if (!chargeStart && me.alive && !ended) chargeStart = performance.now();
+}
+function releaseShot() {
+  if (!chargeStart) return;
+  const held = performance.now() - chargeStart,
+    kind = held >= FIRE.charged.chargeMs ? 'charged' : 'primary';
+  chargeStart = 0;
+  const now = performance.now();
+  if (!room || !me.alive || ended || now - lastShot < FIRE[kind].cooldownMs) return;
+  lastShot = now;
+  send('shoot', { kind });
+  // Desenha na hora com o mesmo traçado do servidor (o dano chega no próximo estado da sala).
+  const enemy = room.enemy.dead ? null : room.enemy,
+    shot = traceShot(world.grid, me, me.a, enemy, kind),
+    from = new THREE.Vector3();
+  muzzle.getWorldPosition(from);
+  effects.fire(from, new THREE.Vector3(shot.end.x * S, 1.3, shot.end.y * S), kind === 'charged');
+  sfx.shot(kind === 'charged');
+  recoil = kind === 'charged' ? 1 : 0.5;
+  if (kind === 'charged') {
+    shake = 0.35;
+    if (shot.hit) setTimeout(() => sfx.boom(), 150);
+  }
+}
+
 // --- Entrada: teclado, botão direito/arrastar gira, joystick no celular ---
 addEventListener('keydown', e => {
+  if (e.code === 'Space' && !e.repeat) startCharge();
   keys.add(e.code);
   if (e.code === 'KeyF') lantern.visible = !lantern.visible;
   if (e.code === 'KeyV') send('revive');
 });
-addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('keyup', e => {
+  if (e.code === 'Space') releaseShot();
+  keys.delete(e.code);
+});
 addEventListener('blur', () => keys.clear());
 const canvas = renderer.domElement,
   drags = new Map();
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button === 0) {
+    startCharge();
+    return;
+  }
   if (e.pointerType === 'mouse' && e.button !== 2) return;
   drags.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
@@ -260,7 +337,10 @@ canvas.addEventListener('pointermove', e => {
   d.x = e.clientX;
   d.y = e.clientY;
 });
-const release = e => drags.delete(e.pointerId);
+const release = e => {
+  if (e.pointerType === 'mouse' && e.button === 0) releaseShot();
+  drags.delete(e.pointerId);
+};
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);
 const stickEl = $('stick'),
@@ -283,7 +363,14 @@ for (const type of ['pointerup', 'pointercancel'])
     stick = { x: 0, y: 0 };
     knob.style.transform = '';
   });
-for (const b of document.querySelectorAll('#touchButtons button'))
+const fireButton = $('fire');
+fireButton.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  startCharge();
+});
+fireButton.addEventListener('pointerup', releaseShot);
+fireButton.addEventListener('pointercancel', releaseShot);
+for (const b of document.querySelectorAll('#touchButtons button[data-key]'))
   b.onclick = () => {
     if (b.dataset.key === 'run') touchRun = !touchRun;
     if (b.dataset.key === 'light') lantern.visible = !lantern.visible;
@@ -329,6 +416,19 @@ function stepSelf(dt, now) {
   $('staminaFill').style.width = me.stamina + '%';
   camera.position.set(me.x * S, EYE + (speed ? Math.abs(Math.sin(now / 160)) * 0.04 : 0), me.y * S);
   camera.rotation.set(me.pitch, -me.a - Math.PI / 2, 0);
+  if (shake > 0) {
+    camera.rotation.x += (Math.random() - 0.5) * shake * 0.1;
+    camera.rotation.y += (Math.random() - 0.5) * shake * 0.1;
+    shake = Math.max(0, shake - dt * 1.5);
+  }
+  // Coice do braço e brilho/mira crescendo enquanto carrega.
+  recoil = Math.max(0, recoil - dt * 6);
+  arm.position.z = -0.45 + recoil * 0.06;
+  const charge = chargeStart ? Math.min(1, (now - chargeStart) / FIRE.charged.chargeMs) : 0;
+  cannonGlow.color.setRGB(1, 0.54 - charge * 0.35, 0.16 - charge * 0.16);
+  muzzle.scale.setScalar(1 + charge * 0.35 + (charge === 1 ? Math.sin(now / 40) * 0.05 : 0));
+  $('crosshair').style.transform = `scale(${1 + charge * 3})`;
+  $('crosshair').classList.toggle('charged', charge === 1);
 }
 
 let last = performance.now();
@@ -342,6 +442,7 @@ function frame(now) {
   if (room && world) {
     stepSelf(dt, now);
     level.update(room, now / 1000);
+    effects.update(dt);
     level.moveEnemy(room.enemy, dt);
     // Zumbido mais forte embaixo das luminárias.
     hum.set(1 - Math.min(1, level.nearestLamp(me.x * S, me.y * S) / 5));

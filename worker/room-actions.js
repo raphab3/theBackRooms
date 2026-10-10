@@ -1,3 +1,4 @@
+import { FIRE, traceShot } from '@backrooms/shared/combat.js';
 import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 import { authorize, colors, nameOf, newPlayer } from './players.js';
@@ -5,6 +6,7 @@ import {
   ACTIVE_MS,
   MAX_PLAYERS,
   beginPhase,
+  damageEnemy,
   distance,
   tickRoom,
   validateMovement,
@@ -22,6 +24,7 @@ const ROOM_ACTIONS = [
   'mode',
   'chat',
   'resume',
+  'shoot',
 ];
 
 function join(room, body, now) {
@@ -43,6 +46,36 @@ function playerAction(room, action, body, now) {
   p.seen = now;
   // Quem chega pelo portal do lobby já está na sala: só confirma a sessão e recebe o estado.
   if (action === 'resume') return { id: p.id, token: p.token };
+  if (action === 'shoot') {
+    if (!p.alive) throw new ApiError('Você foi pego.', 409);
+    if (room.status !== 'playing') throw new ApiError('A expedição não está em andamento.', 409);
+    if (!Number.isFinite(body.a)) throw new ApiError('Disparo inválido.');
+    const kind = body.kind === 'charged' ? 'charged' : 'primary',
+      spec = FIRE[kind];
+    // Recarga do braço: disparo cedo demais é ignorado sem erro (o cliente só não vê o tiro).
+    if (now - (p.shotAt || 0) < spec.cooldownMs) return { hit: false, cooldown: true };
+    p.shotAt = now;
+    // O tiro sai da posição que o servidor conhece; do cliente só vem a mira.
+    const enemy = room.enemy,
+      shot = traceShot(room.world.grid, p, body.a, enemy.dead ? null : enemy, kind);
+    if (shot.hit) {
+      damageEnemy(room, spec.damage, now);
+      if (kind === 'primary' && !enemy.dead) enemy.burnUntil = now + spec.burnMs;
+    }
+    room.effects = [
+      ...(room.effects || []).filter(e => now - e.at < 1000),
+      {
+        id: crypto.randomUUID(),
+        by: p.id,
+        kind,
+        from: { x: p.x, y: p.y },
+        to: shot.end,
+        hit: shot.hit,
+        at: now,
+      },
+    ].slice(-20);
+    return { hit: shot.hit };
+  }
   if (action === 'chat') {
     const text =
       typeof body.text === 'string' ? body.text.replace(/[\x00-\x1f\x7f]/g, ' ').trim() : '';
@@ -195,7 +228,7 @@ function playerAction(room, action, body, now) {
     if (
       now - room.started > (room.level === 'run' ? 6000 : 22000) &&
       now >= (p.protectedUntil || 0) &&
-      (distance(p, room.enemy) < 0.43 ||
+      ((!room.enemy.dead && distance(p, room.enemy) < 0.43) ||
         (room.mode === 'hardcore' && distance(p, room.smile) < 0.43))
     )
       p.alive = false;

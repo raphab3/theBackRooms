@@ -1,3 +1,4 @@
+import { ENEMY_HP, ENEMY_RESPAWN_MS, FIRE } from '@backrooms/shared/combat.js';
 import { PHASE_ORDER, createWorld, findRoute } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 
@@ -29,6 +30,7 @@ function beginPhase(room, now, level = room.level) {
   room.fuses = room.world.fuses.map(() => false);
   room.enemy = { ...room.world.enemy };
   room.smile = room.mode === 'hardcore' ? { ...room.world.smile } : null;
+  room.effects = [];
   for (const p of room.players)
     Object.assign(p, {
       x: 1.5,
@@ -45,6 +47,33 @@ function beginPhase(room, now, level = room.level) {
 }
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// Braço de Fogo: dano na entidade; morta, ela some e reaparece longe da equipe depois.
+function damageEnemy(room, amount, now) {
+  const enemy = room.enemy;
+  if (enemy.dead) return;
+  enemy.hp = (enemy.hp ?? ENEMY_HP) - amount;
+  if (enemy.hp <= 0) {
+    enemy.hp = 0;
+    enemy.dead = true;
+    enemy.respawnAt = now + ENEMY_RESPAWN_MS;
+    enemy.burnUntil = 0;
+    enemy.path = [];
+  }
+}
+function updateEnemyHealth(room, now, dt) {
+  const enemy = room.enemy;
+  if (!enemy.dead && (enemy.burnUntil || 0) > now)
+    damageEnemy(room, FIRE.primary.burnDps * dt, now);
+  if (enemy.dead && now >= enemy.respawnAt) {
+    // Reaparece na célula livre mais longe de todos os exploradores vivos.
+    const alive = room.players.filter(p => p.alive),
+      cells = [room.world.enemy, ...room.world.coins],
+      far = c => Math.min(Infinity, ...alive.map(p => distance(p, c))),
+      spot = cells.reduce((best, c) => (far(c) > far(best) ? c : best), cells[0]);
+    Object.assign(enemy, { x: spot.x, y: spot.y, hp: ENEMY_HP, dead: false, path: [], pathAt: 0 });
+  }
+}
 const isOpen = (grid, x, y) =>
   Number.isFinite(x) && Number.isFinite(y) && grid[Math.floor(y)]?.[Math.floor(x)] === 0;
 function tickRoom(room, now) {
@@ -90,8 +119,10 @@ function tickRoom(room, now) {
     if (online.length) room.status = 'lost';
     return;
   }
+  updateEnemyHealth(room, now, dt);
   if (now - room.started < (room.level === 'run' ? 6000 : 22000)) return;
   for (const enemy of room.mode === 'hardcore' ? [room.enemy, room.smile] : [room.enemy]) {
+    if (enemy.dead) continue;
     if (
       !enemy.path?.length ||
       ((!enemy.pathAt || now - enemy.pathAt > 1000) &&
@@ -163,7 +194,16 @@ function safeRoom(room, now) {
     fuses: room.fuses,
     balance: room.balance || 0,
     collectedCoins: room.collectedCoins || [],
-    enemy: { x: room.enemy.x, y: room.enemy.y, type: 'enemy' },
+    enemy: {
+      x: room.enemy.x,
+      y: room.enemy.y,
+      type: 'enemy',
+      hp: room.enemy.hp ?? ENEMY_HP,
+      dead: !!room.enemy.dead,
+      burning: (room.enemy.burnUntil || 0) > now,
+    },
+    // Disparos do último segundo, para cada um ver os tiros dos colegas.
+    effects: (room.effects || []).filter(e => now - e.at < 1000),
     players: room.players
       .filter(p => now - p.seen < ACTIVE_MS)
       .map(({ id, name, color, skin, x, y, a, alive, respawns = 0 }) => ({
@@ -244,6 +284,7 @@ function validateMovement(room, p, body, now, previousSeen) {
 
 export {
   ACTIVE_MS,
+  damageEnemy,
   MAX_PLAYERS,
   TTL,
   beginPhase,

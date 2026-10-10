@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./world.js": "./world.js",
-    "./lobby.js": "./lobby.js"
+    "./lobby.js": "./lobby.js",
+    "./combat.js": "./combat.js"
   }
 }

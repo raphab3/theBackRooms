@@ -69,3 +69,21 @@
   text-align: center;
   color: var(--muted);
 }
+
+.hpBar {
+  width: 70px;
+  height: 6px;
+  background: rgb(0 0 0 / 60%);
+  border: 1px solid rgb(255 255 255 / 40%);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.hpBar > div {
+  height: 100%;
+  background: #ff5a3a;
+  transition: width 0.15s;
+}
+#crosshair.charged {
+  background: #ff6a1a;
+  box-shadow: 0 0 10px #ff6a1a;
+}
