@@ -1,0 +1,16 @@
+{
+  "name": "@backrooms/game",
+  "version": "60.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@backrooms/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

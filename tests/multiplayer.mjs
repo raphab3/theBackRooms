@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFile, readdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { api } from '../worker/index.js';
-import { createWorld, findRoute, PHASE_ORDER, phaseFuseCount } from '../public/world.js';
+import { createWorld, findRoute, PHASE_ORDER, phaseFuseCount } from '../packages/shared/world.js';
 const sqlite = new DatabaseSync(':memory:');
 for (const f of await readdir('drizzle'))
   if (f.endsWith('.sql')) sqlite.exec(await readFile('drizzle/' + f, 'utf8'));
@@ -181,15 +181,15 @@ console.log(
 );
 // Run the actual front-end in two isolated page contexts connected to the API.
 const { default: vm } = await import('node:vm');
-const worldSource = (await readFile('public/world.js', 'utf8'))
+const worldSource = (await readFile('packages/shared/world.js', 'utf8'))
   .replaceAll('export function', 'function')
   .replaceAll('export const', 'const');
-// Junta os módulos de public/js na mesma ordem em que o navegador os avalia (pós-ordem dos
+// Junta os módulos de apps/game/js na mesma ordem em que o navegador os avalia (pós-ordem dos
 // imports a partir do main.js), sem import/export, para rodar como um único script na VM.
 async function bundleClient(file = 'main.js', seen = new Set(), out = []) {
   if (seen.has(file)) return out;
   seen.add(file);
-  const source = await readFile('public/js/' + file, 'utf8');
+  const source = await readFile('apps/game/js/' + file, 'utf8');
   for (const [, dep] of source.matchAll(/^import [^;]*? from '\.\/([\w-]+\.js)';$/gm))
     await bundleClient(dep, seen, out);
   out.push(
@@ -871,7 +871,7 @@ soloSequence.run('elapsed=14;finish(true);finish(false);start()');
 assert.equal(soloSequence.run('activeLevel'), 'poolrooms');
 soloSequence.run("document.getElementById('solo').onclick()");
 assert.equal(soloSequence.run('activeLevel'), 'backrooms');
-const sequenceMarkup = await readFile('public/index.html', 'utf8');
+const sequenceMarkup = await readFile('apps/game/index.html', 'utf8');
 assert.ok(!sequenceMarkup.includes('class="level-selector"'));
 assert.ok(sequenceMarkup.includes('>PLAY <span>'));
 console.log(
@@ -1475,7 +1475,8 @@ console.log(
 );
 
 // Custom maps: real SQLite and the real browser gameplay functions.
-const { newCustomMap, validateCustomMap, createCustomWorld } = await import('../public/world.js');
+const { newCustomMap, validateCustomMap, createCustomWorld } =
+  await import('../packages/shared/world.js');
 async function maps(action, body = {}, expected = 200) {
   const r = await api(
     new Request('https://game.test/api/maps/' + action, {

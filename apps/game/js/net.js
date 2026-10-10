@@ -1,5 +1,5 @@
 // Multiplayer: salas, sincronização por polling, lobby e trilha de movimento.
-import { PHASE_ORDER } from '../world.js';
+import { PHASE_ORDER } from '@backrooms/shared/world.js';
 import { initAudio, syncGameMusic, syncMenuMusic, tone } from './audio.js';
 import { builder, openWorkshop, returnToBuilder } from './builder.js';
 import { closeChat, renderChat } from './chat.js';

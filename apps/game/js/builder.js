@@ -5,7 +5,7 @@ import {
   createCustomWorld,
   newCustomMap,
   validateCustomMap,
-} from '../world.js';
+} from '@backrooms/shared/world.js';
 import { gameMusic, initAudio, playMusic, syncGameMusic, syncMenuMusic } from './audio.js';
 import { chatOpen, ensureGlobalSession } from './chat.js';
 import { $, H, W, ctx } from './dom.js';
