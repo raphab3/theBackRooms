@@ -32,4 +32,25 @@ assert.throws(
     }),
   /boom/,
 );
+// valores inválidos viram 0, detalhe é truncado, RTT acima do limite é descartado, binding que lança não propaga
+const before = points.length;
+track(env, 'tick', 'ABC234', NaN, 'x'.repeat(200));
+assert.equal(points[before].doubles[0], 0);
+assert.equal(points[before].blobs[1].length, 64);
+recordRtt(env, 'ABC234', 'p1', 60001);
+assert.equal(points.length, before + 1);
+assert.doesNotThrow(() =>
+  track(
+    {
+      TELEMETRY: {
+        writeDataPoint: () => {
+          throw new Error('quota');
+        },
+      },
+    },
+    'rtt',
+    'A',
+    1,
+  ),
+);
 console.log('PASS: telemetria grava eventos válidos, ignora RTT inválido e é no-op sem binding.');
