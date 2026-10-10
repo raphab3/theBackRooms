@@ -8,9 +8,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node scripts/local-server.mjs",
-    "dev": "wrangler dev",
-    "release": "wrangler d1 migrations apply backrooms --remote && wrangler deploy",
+    "build:admin": "node scripts/copy-admin.mjs",
+    "start": "pnpm build:admin && node scripts/local-server.mjs",
+    "dev": "pnpm build:admin && wrangler dev",
+    "release": "pnpm build:admin && wrangler d1 migrations apply backrooms --remote && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply backrooms --local",
     "test": "node tests/multiplayer.mjs",
     "lint": "eslint .",

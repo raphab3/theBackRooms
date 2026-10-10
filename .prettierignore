@@ -4,3 +4,4 @@ data/
 pnpm-lock.yaml
 drizzle/meta/
 *.mp3
+public/admin/

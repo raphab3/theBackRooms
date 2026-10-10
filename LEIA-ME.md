@@ -28,12 +28,13 @@ Esta cópia tem seu próprio chat, ranking, mapas do construtor e progresso. Seu
 Os dados locais ficam em `data/game.sqlite`, criado ao iniciar. Para fazer backup, pare o servidor e copie a pasta `data`.
 WASD: mover; mouse: olhar; Shift: correr; F: lanterna; V: reviver; Esc: pausa; T: chat; M: mostrar/esconder mapa no Normal. No celular, use o joystick e arraste para olhar. Controles Xbox/PlayStation também são suportados.
 
-Nome especial: `lucca416453416453admin`. Ele libera mapas e moedas infinitas. O acesso é pelo nome, sem senha; qualquer pessoa que usar esse nome recebe os poderes. Partidas com vantagens admin não entram no ranking.
+Painel admin: não existe mais nome especial no jogo. A administração fica em `apps/admin` (servido em `/admin/`) e a API em `/api/admin/*`, protegidas pelo Cloudflare Access: a API valida o JWT do cabeçalho `Cf-Access-Jwt-Assertion` (assinatura RS256, `iss`, `aud` e validade) e responde 403 sem ele. Configure em `wrangler.jsonc` (`vars`) `ACCESS_TEAM_DOMAIN` (ex.: `seutime.cloudflareaccess.com`) e `ACCESS_AUD` (AUD da aplicação Access), e crie uma aplicação Access cobrindo `/admin/*` e `/api/admin/*`. Sem essas variáveis tudo é negado. O painel lista salas ativas, leva uma sala para qualquer fase, modera chat e mapas do construtor e ajusta as moedas de uma conta. Salas movidas pelo admin ficam com `adminUsed` e não entram no ranking. O painel é copiado para `public/admin/` por `pnpm build:admin` (já incluído em `start`, `dev` e `release`).
 
 ## Código-fonte
 
 `public/`: jogo, músicas e interface (HTML/CSS/JS puro, sem build). O cliente fica em `public/js/` em módulos ES: `main.js` (entrada e ordem de inicialização), `state.js` (estado compartilhado `game`), `engine.js` (núcleo e loop), `render.js` (raycasting), `net.js` (multiplayer), `builder.js` (construtor) e um módulo por recurso (chat, missões, ranking, gamepad, toque, áudio…). `world.js` gera os labirintos e é compartilhado com o servidor.
-`worker/`: API em módulos — `index.js` (entrada), `api.js` (rotas), `rooms.js` (salas e partida), `players.js`, `chat.js`, `profiles.js`, `leaderboard.js`, `maps.js` (construtor) e `http.js` (respostas e erros).
+`apps/admin/`: painel admin.
+`worker/`: API em módulos — `index.js` (entrada), `api.js` (rotas), `admin.js` (API admin + Access), `rooms.js` (salas e partida), `players.js`, `chat.js`, `profiles.js`, `leaderboard.js`, `maps.js` (construtor) e `http.js` (respostas e erros).
 `drizzle/`: migrações do banco (SQLite/D1).
 `scripts/local-server.mjs`: servidor portátil usando SQLite do Node.js.
 `tests/`: testes do jogo.

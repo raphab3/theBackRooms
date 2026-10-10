@@ -1361,48 +1361,117 @@ console.log(
   'PASS: final chase completed with real sprint and monster logic, infinite stamina, three reachable fuses, six-second server pursuit and ranking upgraded for eleven phases.',
 );
 
-const adminRoom = await call('create', {
+// Admin: o antigo nome mágico não dá poder; /api/admin/* exige o JWT do Cloudflare Access.
+const oldAdmin = await call('create', {
   name: 'lucca416453416453admin',
   campaign: true,
   mode: 'hardcore',
 });
-const adminGuest = await call('join', { name: 'Normal', code: adminRoom.room.code });
-await call(
-  'admin-level',
-  payload(adminGuest, { name: 'lucca416453416453admin', level: 'poolrooms' }),
+await call('revive', payload(oldAdmin), 409);
+await call('admin-level', payload(oldAdmin, { level: 'poolrooms' }), 404);
+const adminUi = client();
+adminUi.run("$('nickname').value='lucca416453416453admin';showPanel('home');updateRescueUI()");
+assert.equal(adminUi.run('typeof isAdmin'), 'undefined');
+assert.notEqual(adminUi.elements.coinCount.textContent, '∞');
+
+const keys = await crypto.subtle.generateKey(
+  {
+    name: 'RSASSA-PKCS1-v1_5',
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: 'SHA-256',
+  },
+  true,
+  ['sign', 'verify'],
+);
+const jwks = JSON.stringify({
+  keys: [{ ...(await crypto.subtle.exportKey('jwk', keys.publicKey)), kid: 'k1' }],
+});
+const team = 'time.cloudflareaccess.com',
+  aud = 'aud-test';
+const b64u = data =>
+  Buffer.from(typeof data === 'string' ? data : new Uint8Array(data)).toString('base64url');
+async function accessToken(claims = {}) {
+  const head = b64u(JSON.stringify({ alg: 'RS256', kid: 'k1' })),
+    body = b64u(
+      JSON.stringify({
+        iss: 'https://' + team,
+        aud: [aud],
+        exp: Date.now() / 1000 + 300,
+        ...claims,
+      }),
+    );
+  const sig = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    keys.privateKey,
+    new TextEncoder().encode(head + '.' + body),
+  );
+  return head + '.' + body + '.' + b64u(sig);
+}
+async function adminCall(action, body = {}, token, expected = 200, env = {}) {
+  const r = await api(
+    new Request('https://game.test/api/admin/' + action, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://game.test',
+        ...(token ? { 'Cf-Access-Jwt-Assertion': token } : {}),
+      },
+      body: JSON.stringify(body),
+    }),
+    { DB, ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: aud, ACCESS_JWKS: jwks, ...env },
+  );
+  const d = await r.json();
+  assert.equal(r.status, expected, JSON.stringify(d));
+  return d;
+}
+await adminCall('rooms', {}, undefined, 403);
+await adminCall('rooms', {}, 'x.y.z', 403);
+await adminCall('rooms', {}, await accessToken({ aud: ['outra'] }), 403);
+await adminCall('rooms', {}, await accessToken({ exp: 1 }), 403);
+await adminCall('rooms', {}, await accessToken({ iss: 'https://outro' }), 403);
+await adminCall(
+  'rooms',
+  {},
+  (await accessToken()).replace(/(.)(.{20})$/, (_, c, rest) => (c === 'A' ? 'B' : 'A') + rest),
   403,
 );
+await adminCall('rooms', {}, await accessToken(), 403, { ACCESS_AUD: '' });
+const token = await accessToken();
+const listed = await adminCall('rooms', {}, token);
+assert.ok(listed.rooms.some(r => r.code === oldAdmin.room.code));
 for (const level of [...client().run('PHASE_ORDER'), 'lurking']) {
-  const result = await call('admin-level', payload(adminRoom, { level }));
+  const result = await adminCall('level', { code: oldAdmin.room.code, level }, token);
   assert.equal(result.room.level, level);
   assert.equal(result.room.status, 'playing');
   assert.equal(result.room.adminUsed, true);
 }
-modifyRoom(adminRoom.room.code, r => {
-  r.status = 'lost';
-  r.balance = 0;
-  r.players.forEach(p => (p.alive = false));
-});
-const adminRescue = await call('revive', payload(adminRoom));
-assert.equal(adminRescue.room.balance, 0);
-assert.ok(adminRescue.room.players.every(p => p.alive));
-await rankCall('submit', { ...complete, name: 'lucca416453416453admin', milliseconds: 20000 }, 409);
-const adminUi = client();
-adminUi.run("$('nickname').value='lucca416453416453admin';showPanel('home');updateRescueUI()");
-assert.equal(adminUi.elements.adminPanel.hidden, false);
-assert.equal(adminUi.elements.coinCount.textContent, '∞');
-adminUi.run("$('adminMap').value='poolrooms'");
-await adminUi.run("$('adminGo').onclick()");
-assert.equal(adminUi.run('activeLevel'), 'poolrooms');
-assert.equal(adminUi.run('state'), 'playing');
-adminUi.run('coinBalance=0;finish(false)');
-await adminUi.run('reviveAll()');
-assert.equal(adminUi.run('state'), 'playing');
-assert.equal(adminUi.run('coinBalance'), 0);
-adminUi.run("$('nickname').value='Normal';showPanel('home')");
-assert.equal(adminUi.elements.adminPanel.hidden, true);
+const glitch = await adminCall('level', { code: oldAdmin.room.code, level: 'glitch' }, token);
+assert.equal(glitch.room.level, 'glitch');
+await rankCall(
+  'submit',
+  { name: 'Ana', code: oldAdmin.room.code, id: oldAdmin.id, token: oldAdmin.token },
+  409,
+);
+await call('chat', payload(oldAdmin, { text: 'oi', messageId: 'mensagem-0001' }));
+const roomChat = await adminCall('chat', { code: oldAdmin.room.code }, token);
+assert.equal(roomChat.room.length, 1);
+await adminCall(
+  'chat-delete',
+  { scope: 'room', code: oldAdmin.room.code, id: roomChat.room[0].id },
+  token,
+);
+assert.equal((await adminCall('chat', { code: oldAdmin.room.code }, token)).room.length, 0);
+await adminCall('coins', { name: 'Ana', coins: 77 }, token);
+assert.equal(
+  sqlite.prepare("SELECT value FROM explorer_missions WHERE profile='ana' AND key='coins'").get()
+    .value,
+  77,
+);
+await adminCall('coins', { name: 'Ana', coins: -1 }, token, 400);
+await adminCall('maps', {}, token);
 console.log(
-  'PASS: full admin name, exclusive panel, all maps, authenticated server restriction, infinite solo/team revival and ranking exclusion.',
+  'PASS: admin name grants nothing; /api/admin requires a valid Cloudflare Access JWT; admin can move rooms to any phase, moderate chat and set coins.',
 );
 
 for (const seed of [1, 93451, 4294967295]) {

@@ -4,12 +4,12 @@ import { builder } from './builder.js';
 import { closeChat } from './chat.js';
 import { $ } from './dom.js';
 import { pause } from './engine.js';
-import { isAdmin, net, requestRoom, showPanel } from './net.js';
+import { net, requestRoom, showPanel } from './net.js';
 import { game } from './state.js';
 
 async function submitLeaderboardTime() {
   if (builder.custom) return;
-  if (isAdmin() || net?.room.adminUsed) return;
+  if (net?.room.adminUsed) return;
   if (
     net
       ? !net.room.campaign || net.room.status !== 'won' || game.activeLevel !== PHASE_ORDER.at(-1)

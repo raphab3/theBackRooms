@@ -2141,39 +2141,6 @@ footer {
   }
 }
 
-#adminPanel {
-  border: 1px solid #ddbb55;
-  background: #181e17;
-  padding: 16px;
-  margin-bottom: 18px;
-  max-width: 540px;
-}
-#adminPanel[hidden] {
-  display: none;
-}
-#adminPanel h2 {
-  font-size: 20px;
-  color: #f5d975;
-}
-#adminPanel p {
-  font-size: 14px;
-  line-height: 1.5;
-}
-#adminPanel label {
-  display: block;
-  margin-bottom: 8px;
-}
-#adminPanel select,
-#adminPanel button {
-  width: 100%;
-  min-height: 44px;
-  font: 16px monospace;
-  padding: 10px;
-  margin-bottom: 8px;
-  background: #30382a;
-  color: #fff0bb;
-  border: 1px solid #bca452;
-}
 /* Builder is a working surface over the existing first-person world. */
 .builder-menu-row {
   display: grid;
@@ -2488,9 +2455,6 @@ body.building #chatToggle,
 body.building #languageControl,
 body.building #overlay,
 body.building #notice {
-  display: none !important;
-}
-body.custom-map #adminPanel {
   display: none !important;
 }
 body.building .vignette {

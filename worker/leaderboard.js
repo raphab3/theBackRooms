@@ -1,6 +1,6 @@
 import { PHASE_ORDER } from '../public/world.js';
 import { ApiError } from './http.js';
-import { adminName, authorize, nameOf } from './players.js';
+import { authorize, nameOf } from './players.js';
 import { validatedLevel } from './rooms.js';
 
 async function globalLeaderboard(db, action, body) {
@@ -37,7 +37,6 @@ async function globalLeaderboard(db, action, body) {
     body.level !== PHASE_ORDER.at(-1)
   )
     throw new ApiError('Complete todas as fases para entrar no ranking.', 409);
-  if (adminName(name)) throw new ApiError('Partidas admin não entram no ranking.', 409);
   const profile = name.normalize('NFKC').toLocaleLowerCase('pt-BR');
   if (!Number.isSafeInteger(milliseconds) || milliseconds < 1000 || milliseconds > 86400000)
     throw new ApiError('Tempo inválido.');

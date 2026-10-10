@@ -1,9 +1,10 @@
 import { PHASE_ORDER, createWorld } from '../public/world.js';
+import { adminApi, requireAccess } from './admin.js';
 import { globalChat } from './chat.js';
 import { ApiError, dbFor, json } from './http.js';
 import { globalLeaderboard } from './leaderboard.js';
 import { customMapsApi } from './maps.js';
-import { adminName, authorize, colors, nameOf, newPlayer } from './players.js';
+import { authorize, colors, nameOf, newPlayer } from './players.js';
 import { explorerProfile } from './profiles.js';
 import {
   ACTIVE_MS,
@@ -21,6 +22,8 @@ import {
 async function api(request, env) {
   try {
     const url = new URL(request.url);
+    const admin = url.pathname.startsWith('/api/admin/');
+    if (admin) await requireAccess(request, env);
     if (request.method !== 'POST') throw new ApiError('Método não permitido.', 405);
     const maxBody = url.pathname.startsWith('/api/maps/') ? 65536 : 4096;
     const origin = request.headers.get('Origin');
@@ -38,6 +41,7 @@ async function api(request, env) {
     if (!body || typeof body !== 'object') throw new ApiError('Pedido inválido.');
     const db = dbFor(env),
       action = url.pathname.split('/').pop();
+    if (admin) return json(await adminApi(db, action, body));
     if (url.pathname.startsWith('/api/maps/')) return json(await customMapsApi(db, action, body));
     if (url.pathname.startsWith('/api/profiles/'))
       return json(await explorerProfile(db, action, body));
@@ -113,9 +117,7 @@ async function api(request, env) {
         }),
       );
     }
-    if (
-      !['sync', 'start', 'leave', 'revive', 'level', 'mode', 'chat', 'admin-level'].includes(action)
-    )
+    if (!['sync', 'start', 'leave', 'revive', 'level', 'mode', 'chat'].includes(action))
       throw new ApiError('Ação não encontrada.', 404);
     return json(
       await mutate(db, code, (room, now) => {
@@ -159,25 +161,16 @@ async function api(request, env) {
           ['start', 'mode'].includes(action)
         )
           throw new ApiError('Aguarde a passagem para a próxima fase.', 409);
-        if (action === 'admin-level') {
-          if (!adminName(p.name)) throw new ApiError('Painel exclusivo do admin.', 403);
-          const level = body.level === 'lurking' ? 'lurking' : validatedLevel(body.level);
-          room.adminUsed = true;
-          room.campaign = false;
-          beginPhase(room, now, level);
-          return {};
-        }
         if (action === 'revive') {
-          if (room.mode === 'hardcore' && !adminName(p.name))
+          if (room.mode === 'hardcore')
             throw new ApiError('No Hardcore não é possível reviver.', 409);
           if (!['playing', 'lost'].includes(room.status))
             throw new ApiError('A expedição precisa estar em andamento.', 409);
           const captured = room.players.filter(v => !v.alive && now - v.seen < ACTIVE_MS);
           if (!captured.length) throw new ApiError('Todos os exploradores já estão vivos.', 409);
-          if (!adminName(p.name) && room.balance < 25)
+          if (room.balance < 25)
             throw new ApiError('A equipe precisa de 25 moedas para reviver.', 409);
-          if (adminName(p.name)) room.adminUsed = true;
-          else room.balance -= 25;
+          room.balance -= 25;
           room.status = 'playing';
           room.lastTick = now;
           for (const v of captured) {

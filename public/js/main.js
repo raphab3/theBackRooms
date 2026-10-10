@@ -1,5 +1,4 @@
 // Ponto de entrada: liga os eventos de cada módulo e inicia o jogo, na ordem original.
-import { setupAdmin } from './admin.js';
 import { setupAudio } from './audio.js';
 import { setupBuilder } from './builder.js';
 import { renderChat, setupChat } from './chat.js';
@@ -59,6 +58,5 @@ renderChat();
 try {
   $('nickname').value = localStorage.getItem('backrooms.explorerName') || '';
 } catch {}
-setupAdmin();
 setupBuilder();
 setupLevelmap();
