@@ -4,7 +4,9 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { LOBBY_BOUNDS, RUN_SPEED, SKINS } from '@backrooms/shared/lobby.js';
 import { Avatar, preloadSkins } from './avatar.js';
 import { RemoteBuffer, enterLobby, openLobbySocket } from './net.js';
-import { PILLARS, PILLAR_RADIUS, buildLobby } from './scene.js';
+import { createHum } from './hum.js';
+import { bindQualitySelect, createPipeline } from './quality.js';
+import { PILLARS, PILLAR_RADIUS, animateLobby, buildLobby } from './scene.js';
 
 const $ = id => document.getElementById(id);
 const NAME_KEY = 'backrooms.explorerName',
@@ -21,7 +23,6 @@ const NAME_KEY = 'backrooms.explorerName',
 // --- Renderização ---
 const view = $('view'),
   renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 view.append(renderer.domElement);
 const labels = new CSS2DRenderer();
@@ -32,9 +33,13 @@ labels.domElement.style.zIndex = '1';
 document.body.append(labels.domElement);
 const scene = new THREE.Scene(),
   camera = new THREE.PerspectiveCamera(60, 1, 0.1, 80),
-  portals = buildLobby(scene);
+  portals = buildLobby(scene),
+  pipeline = createPipeline(renderer, scene, camera),
+  hum = createHum();
+bindQualitySelect($('quality'), pipeline);
+hum.set(0.5);
 function resize() {
-  renderer.setSize(innerWidth, innerHeight);
+  pipeline.resize();
   labels.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -474,7 +479,8 @@ function frame(now) {
     camera.lookAt(0, 1.4, -6);
   }
   for (const portal of portals) portal.render(Date.now(), me.id);
-  renderer.render(scene, camera);
+  animateLobby(now / 1000);
+  pipeline.render(dt * 1000, now);
   labels.render(scene, camera);
 }
 requestAnimationFrame(frame);

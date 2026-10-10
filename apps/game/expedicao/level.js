@@ -74,7 +74,16 @@ export function buildLevel(scene, world) {
       m.compose(new THREE.Vector3((x + 0.5) * S, WALL_HEIGHT - 0.01, (y + 0.5) * S), q, one),
     ),
   );
+  lampMesh.instanceColor = new THREE.InstancedBufferAttribute(
+    new Float32Array(lamps.length * 3).fill(1),
+    3,
+  );
   scene.add(lampMesh);
+  // Algumas luminárias piscam (escolha fixa pela posição, igual para todos).
+  const flickering = lamps
+      .map(([x, y], i) => ((x * 3 + y * 5) % 7 === 0 ? i : -1))
+      .filter(i => i >= 0),
+    lampColor = new THREE.Color();
 
   scene.add(new THREE.HemisphereLight(0xfff1c2, 0x3a2f12, 1.3));
   scene.fog = new THREE.Fog(0x8f8247, 2, 22);
@@ -154,6 +163,18 @@ export function buildLevel(scene, world) {
         ),
       );
       coinMesh.instanceMatrix.needsUpdate = true;
+      for (const i of flickering) {
+        const v = Math.sin(t * 7 + i * 13) * Math.sin(t * 1.3 + i);
+        lampMesh.setColorAt(i, lampColor.setScalar(v > 0.8 ? 0.12 : 1));
+      }
+      lampMesh.instanceColor.needsUpdate = true;
+    },
+    /** Distância (em metros) do ponto até a luminária acesa mais próxima, para o zumbido. */
+    nearestLamp(px, pz) {
+      let best = Infinity;
+      for (const [x, y] of lamps)
+        best = Math.min(best, Math.hypot((x + 0.5) * S - px, (y + 0.5) * S - pz));
+      return best;
     },
     // A entidade anda entre snapshots: suaviza até a posição do servidor e olha para onde vai.
     moveEnemy(target, dt) {

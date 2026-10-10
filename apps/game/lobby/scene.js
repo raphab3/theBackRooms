@@ -140,7 +140,9 @@ function buildHall(scene) {
           m.compose(new THREE.Vector3(x, height - 0.01, z), q, new THREE.Vector3(1, 1, 1)),
         );
   panel.count = i;
+  panel.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(48 * 3).fill(1), 3);
   scene.add(panel);
+  lobbyPanel = panel;
   const pillarGeo = new THREE.BoxGeometry(PILLAR_RADIUS * 2, height, PILLAR_RADIUS * 2);
   for (const p of PILLARS) {
     const pillar = new THREE.Mesh(pillarGeo, wallMaterial);
@@ -232,6 +234,18 @@ class Portal {
     this.ring.rotation.z += 0.01 * speed;
     this.veil.material.opacity = 0.3 + Math.sin(now / (endsAt ? 120 : 600)) * 0.12;
   }
+}
+
+// Dois painéis do salão piscam, como lâmpada fluorescente gasta.
+let lobbyPanel = null;
+const panelColor = new THREE.Color();
+export function animateLobby(t) {
+  if (!lobbyPanel) return;
+  for (const i of [7, 22]) {
+    const v = Math.sin(t * 6 + i) * Math.sin(t * 1.7 + i * 3);
+    lobbyPanel.setColorAt(i, panelColor.setScalar(v > 0.75 ? 0.15 : 1));
+  }
+  lobbyPanel.instanceColor.needsUpdate = true;
 }
 
 export function buildLobby(scene) {

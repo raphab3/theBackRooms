@@ -4,7 +4,9 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createWorld } from '@backrooms/shared/world.js';
 import { Avatar } from '../lobby/avatar.js';
+import { createHum } from '../lobby/hum.js';
 import { RemoteBuffer } from '../lobby/net.js';
+import { bindQualitySelect, createPipeline } from '../lobby/quality.js';
 import { S, buildLevel } from './level.js';
 
 const $ = id => document.getElementById(id);
@@ -20,7 +22,6 @@ const WALK = 1.85, // células/s, como no jogo clássico
 
 // --- Renderização ---
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 $('view').append(renderer.domElement);
 const labels = new CSS2DRenderer();
@@ -39,8 +40,11 @@ const lantern = new THREE.SpotLight(0xfff4d8, 18, 16, 0.5, 0.45, 1.4);
 lantern.position.set(0.15, -0.15, 0);
 lantern.target.position.set(0, 0, -1);
 camera.add(lantern, lantern.target);
+const pipeline = createPipeline(renderer, scene, camera),
+  hum = createHum();
+bindQualitySelect($('quality'), pipeline);
 function resize() {
-  renderer.setSize(innerWidth, innerHeight);
+  pipeline.resize();
   labels.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -332,6 +336,8 @@ function frame(now) {
     stepSelf(dt, now);
     level.update(room, now / 1000);
     level.moveEnemy(room.enemy, dt);
+    // Zumbido mais forte embaixo das luminárias.
+    hum.set(1 - Math.min(1, level.nearestLamp(me.x * S, me.y * S) / 5));
     for (const [id, avatar] of remotes) {
       const s = buffer.sample(id, now);
       if (!s) continue;
@@ -343,7 +349,7 @@ function frame(now) {
     $('clock').textContent =
       `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   }
-  renderer.render(scene, camera);
+  pipeline.render(dt * 1000, now);
   labels.render(scene, camera);
 }
 requestAnimationFrame(frame);
