@@ -88,6 +88,14 @@ describe('LobbyDO', () => {
     // Teleporte é recusado com uma correção para a última posição aceita.
     a.send({ t: 'move', x: start.x + 30, z: start.z, yaw: 1, anim: 'run' });
     expect((await a.wait(m => m.t === 'correct')).x).toBeCloseTo(start.x + 0.3, 1);
+    // Cada gesto é numerado: apertar o mesmo de novo faz o boneco repetir.
+    a.send({ t: 'emote', e: 'wave' });
+    const first = await b.wait(
+      m => m.t === 'snap' && m.players.some(p => p.id === a.id && p.emote === 'wave'),
+    );
+    a.send({ t: 'emote', e: 'wave' });
+    const n1 = first.players.find(p => p.id === a.id).emoteN;
+    await b.wait(m => m.t === 'snap' && m.players.some(p => p.id === a.id && p.emoteN === n1 + 1));
     a.send({ t: 'chat', text: 'oi' });
     expect((await b.wait(m => m.t === 'chat')).text).toBe('oi');
   });

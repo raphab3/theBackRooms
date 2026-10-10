@@ -64,6 +64,7 @@ const buffer = new RemoteBuffer(),
     vy: 0,
     anim: 'idle',
     emote: null,
+    emoteN: 0,
     emoteUntil: 0,
   };
 let socket = null,
@@ -297,6 +298,7 @@ $('declineInvite').onclick = () => ($('invite').hidden = true);
 function emote(e) {
   socket?.send({ t: 'emote', e });
   me.emote = e;
+  me.emoteN++;
   me.emoteUntil = performance.now() + 3000;
 }
 function jump() {
@@ -445,7 +447,7 @@ function stepSelf(dt, now) {
   }
   self.root.position.set(me.x, 0, me.z);
   self.root.rotation.y = me.yaw;
-  self.update(dt, { speed, anim: me.anim, emote: me.emote, jumpY: me.y }, now);
+  self.update(dt, { speed, anim: me.anim, emote: me.emote, emoteN: me.emoteN, jumpY: me.y }, now);
 }
 
 const cameraTarget = new THREE.Vector3(),
@@ -487,6 +489,7 @@ function frame(now) {
           speed: s.anim === 'idle' ? 0 : s.speed,
           anim: s.anim,
           emote: s.emote,
+          emoteN: s.emoteN,
           jumpY: s.anim === 'jump' ? 0.45 : 0,
         },
         now,

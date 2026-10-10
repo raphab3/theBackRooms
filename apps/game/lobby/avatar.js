@@ -9,7 +9,8 @@ const HEIGHT = 1.8, // metros
   FADE = 0.2,
   WALK_CLIP_SPEED = 2.2, // m/s em que a animação walk do pacote não "patina"
   SPRINT_CLIP_SPEED = 5.5,
-  EMOTE_CLIPS = { wave: 'interact-right', point: 'holding-right-shoot', dance: 'emote-yes' };
+  EMOTE_CLIPS = { wave: 'interact-right', point: 'holding-right-shoot', dance: 'emote-yes' },
+  ONCE_EMOTES = new Set(['wave', 'point']); // tocam uma vez e voltam ao normal; dançar repete
 const loader = new GLTFLoader(),
   models = new Map(); // skin → Promise<{scene, animations, scale}>
 
@@ -71,6 +72,11 @@ export class Avatar {
     for (const clip of animations) this.actions[clip.name] = this.mixer.clipAction(clip);
     // Cair toca uma vez e fica no chão.
     this.actions.die?.setLoop(THREE.LoopOnce, 1);
+    for (const emote of ONCE_EMOTES) this.actions[EMOTE_CLIPS[emote]]?.setLoop(THREE.LoopOnce, 1);
+    // Quando um gesto de uma vez termina, o boneco volta para parado/andando.
+    this.mixer.addEventListener('finished', e => {
+      if (e.action === this.current && this.emote) this.emoteDone = this.emote;
+    });
     if (this.actions.die) this.actions.die.clampWhenFinished = true;
     this.play('idle');
   }
@@ -96,14 +102,21 @@ export class Avatar {
   }
 
   /** speed em m/s no chão; anim do servidor ou local; emote ativo ou null; jumpY altura do pulo. */
-  update(dt, { speed, anim, emote, jumpY = 0 }, now) {
+  update(dt, { speed, anim, emote, emoteN = 0, jumpY = 0 }, now) {
     this.time += dt;
     if (this.bubbleUntil && now > this.bubbleUntil) {
       this.bubbleEl.hidden = true;
       this.bubbleUntil = 0;
     }
+    // Gesto novo (outro gesto, o mesmo apertado de novo ou o fim dele): pode tocar outra vez.
+    if (emote !== this.emote || emoteN !== this.emoteN) {
+      this.emoteDone = null;
+      if (emote && this.current === this.actions[EMOTE_CLIPS[emote]]) this.current?.reset();
+    }
+    this.emote = emote;
+    this.emoteN = emoteN;
     if (anim === 'down') this.play('die');
-    else if (emote && EMOTE_CLIPS[emote]) this.play(EMOTE_CLIPS[emote]);
+    else if (emote && EMOTE_CLIPS[emote] && this.emoteDone !== emote) this.play(EMOTE_CLIPS[emote]);
     else if (anim === 'run' || speed > 4.2)
       this.play('sprint', Math.max(0.6, speed / SPRINT_CLIP_SPEED));
     else if (speed > 0.2) this.play('walk', Math.max(0.6, speed / WALK_CLIP_SPEED));

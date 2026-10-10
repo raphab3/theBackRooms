@@ -198,7 +198,8 @@ class LobbyDO {
     }
     if (msg.t === 'emote') {
       if (!EMOTES.includes(msg.e)) throw new ApiError('Emote inválido.');
-      p.emote = { e: msg.e, until: now + EMOTE_MS };
+      // n conta os gestos: apertar de novo o mesmo gesto faz o boneco repetir.
+      p.emote = { e: msg.e, until: now + EMOTE_MS, n: (p.emoteN = (p.emoteN || 0) + 1) };
       return;
     }
     if (msg.t === 'portalTarget') {
@@ -290,6 +291,7 @@ class LobbyDO {
         yaw: Math.round(p.yaw * 1000) / 1000,
         anim: p.anim,
         emote: p.emote?.e || null,
+        emoteN: p.emote?.n || 0,
         party: this.partyOf(p.id)[0],
       })),
       portals: this.portals.map(({ id, level, slots, endsAt, owner, target }) => ({
