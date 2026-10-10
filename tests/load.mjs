@@ -17,7 +17,8 @@ const ROOMS = opt('rooms', 10),
   BOTS = opt('bots', 4),
   DURATION_MS = opt('minutes', 10) * 60000,
   INTERVAL_MS = Math.round(1000 / opt('hz', 20)),
-  RTT_P95_LIMIT = 100;
+  RTT_P95_LIMIT = 100,
+  MAX_LOSS = 0.01; // no máximo 1% de syncs sem resposta
 
 const origin = new URL(base).origin;
 const rtts = [];
@@ -68,7 +69,8 @@ function connect(session, label) {
       }
       if (msg.type === 'error') apiErrors++;
       const t0 = pending.get(msg.reqId);
-      if (t0 !== undefined && (msg.type === 'result' || msg.type === 'error')) {
+      // Só respostas bem-sucedidas entram no RTT; erro do servidor não é latência.
+      if (t0 !== undefined && msg.type === 'result') {
         rtts.push(performance.now() - t0);
         pending.delete(msg.reqId);
       }
@@ -136,9 +138,17 @@ const summary = {
   apiErrors,
 };
 console.log(JSON.stringify(summary, null, 2));
-const ok = p95 < RTT_P95_LIMIT && socketErrors === 0 && unexpectedCloses === 0;
+const lossRate = sent ? summary.lost / sent : 1;
+const ok =
+  p95 < RTT_P95_LIMIT &&
+  socketErrors === 0 &&
+  unexpectedCloses === 0 &&
+  apiErrors === 0 &&
+  lossRate <= MAX_LOSS;
 console.log(
-  ok ? 'PASS: RTT p95 < 100 ms e sem erros de socket.' : 'FAIL: portão de RTT/erros não atingido.',
+  ok
+    ? 'PASS: RTT p95 < 100 ms, sem erros de socket nem de API e perda <= 1%.'
+    : 'FAIL: portão de RTT/erros não atingido.',
 );
 console.log(
   'Obs.: o RTT medido aqui inclui a rede de quem roda o script; rode de uma rede doméstica no Brasil.',
