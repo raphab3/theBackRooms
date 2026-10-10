@@ -86,9 +86,9 @@ describe('RoomDO', () => {
     expect((await call('join', { name: 'Fantasma', code: 'AAAAAA' })).status).toBe(404);
     const stored = await runInDurableObject(stubOf(code), (_, state) => state.storage.get('room'));
     expect(stored.status).toBe('playing');
-    // Nada de salas no D1: apenas ranking/perfis/mapas continuam lá.
-    const rows = await env.DB.prepare('SELECT count(*) AS n FROM rooms').first();
-    expect(rows.n).toBe(0);
+    // O estado da sala não vai para o D1: lá fica só o registro do código, para o painel admin.
+    const rows = await env.DB.prepare('SELECT code, state FROM rooms').all();
+    expect(rows.results).toEqual([{ code, state: '{}' }]);
   });
 
   it('WebSocket valida movimento no servidor e transmite o estado', async () => {

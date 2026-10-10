@@ -6,3 +6,4 @@ drizzle/meta/
 *.mp3
 dist/
 apps/game/public/admin/
+.specgate/

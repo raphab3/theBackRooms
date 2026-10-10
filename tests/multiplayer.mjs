@@ -1598,16 +1598,16 @@ await adminCall(
   403,
 );
 await adminCall('rooms', {}, await accessToken(), 403, { ACCESS_AUD: '' });
-const token = await accessToken();
-const listed = await adminCall('rooms', {}, token);
+const accessJwt = await accessToken();
+const listed = await adminCall('rooms', {}, accessJwt);
 assert.ok(listed.rooms.some(r => r.code === oldAdmin.room.code));
 for (const level of [...client().run('PHASE_ORDER'), 'lurking']) {
-  const result = await adminCall('level', { code: oldAdmin.room.code, level }, token);
+  const result = await adminCall('level', { code: oldAdmin.room.code, level }, accessJwt);
   assert.equal(result.room.level, level);
   assert.equal(result.room.status, 'playing');
   assert.equal(result.room.adminUsed, true);
 }
-const glitch = await adminCall('level', { code: oldAdmin.room.code, level: 'glitch' }, token);
+const glitch = await adminCall('level', { code: oldAdmin.room.code, level: 'glitch' }, accessJwt);
 assert.equal(glitch.room.level, 'glitch');
 await rankCall(
   'submit',
@@ -1615,22 +1615,22 @@ await rankCall(
   409,
 );
 await call('chat', payload(oldAdmin, { text: 'oi', messageId: 'mensagem-0001' }));
-const roomChat = await adminCall('chat', { code: oldAdmin.room.code }, token);
+const roomChat = await adminCall('chat', { code: oldAdmin.room.code }, accessJwt);
 assert.equal(roomChat.room.length, 1);
 await adminCall(
   'chat-delete',
   { scope: 'room', code: oldAdmin.room.code, id: roomChat.room[0].id },
-  token,
+  accessJwt,
 );
-assert.equal((await adminCall('chat', { code: oldAdmin.room.code }, token)).room.length, 0);
-await adminCall('coins', { name: 'Ana', coins: 77 }, token);
+assert.equal((await adminCall('chat', { code: oldAdmin.room.code }, accessJwt)).room.length, 0);
+await adminCall('coins', { name: 'Ana', coins: 77 }, accessJwt);
 assert.equal(
   sqlite.prepare("SELECT value FROM explorer_missions WHERE profile='ana' AND key='coins'").get()
     .value,
   77,
 );
-await adminCall('coins', { name: 'Ana', coins: -1 }, token, 400);
-await adminCall('maps', {}, token);
+await adminCall('coins', { name: 'Ana', coins: -1 }, accessJwt, 400);
+await adminCall('maps', {}, accessJwt);
 console.log(
   'PASS: admin name grants nothing; /api/admin requires a valid Cloudflare Access JWT; admin can move rooms to any phase, moderate chat and set coins.',
 );

@@ -105,14 +105,14 @@ describe('cliente WebSocket (apps/game/js/net.js) contra o RoomDO real', () => {
     expect(revive.type).toBe('error');
     expect(revive.status).toBe(409);
     expect(typeof revive.error).toBe('string');
-    // 'level' é recusado na campanha; 'admin-level' exige o painel do admin.
+    // 'level' é recusado na campanha; 'admin-level' não existe mais (o admin é /api/admin/*).
     const level = await hostSocket.send('level', payload(host, result.room, { level: 'pool' }));
     expect(level.status).toBe(409);
     const admin = await hostSocket.send(
       'admin-level',
       payload(host, result.room, { level: 'poolrooms' }),
     );
-    expect(admin.status).toBe(403);
+    expect(admin.status).toBe(404);
     // Movimento: o sync a 30 Hz é aceito e o tick de 20 Hz devolve a posição no snapshot da sala.
     const world = createWorld(result.room.seed, result.room.level),
       target = world.grid[1][2] === 0 ? { x: 1.7, y: 1.5 } : { x: 1.5, y: 1.7 },
