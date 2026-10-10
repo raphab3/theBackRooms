@@ -1,13 +1,14 @@
 // Lobby 3D (Posto Zero): menu, jogador local, câmera em 3ª pessoa, outros jogadores e portais.
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { LOBBY_BOUNDS, RUN_SPEED } from '@backrooms/shared/lobby.js';
-import { Avatar } from './avatar.js';
+import { LOBBY_BOUNDS, RUN_SPEED, SKINS } from '@backrooms/shared/lobby.js';
+import { Avatar, preloadSkins } from './avatar.js';
 import { RemoteBuffer, enterLobby, openLobbySocket } from './net.js';
 import { PILLARS, PILLAR_RADIUS, buildLobby } from './scene.js';
 
 const $ = id => document.getElementById(id);
 const NAME_KEY = 'backrooms.explorerName',
+  SKIN_KEY = 'backrooms.skin',
   WALK_SPEED = 3.6,
   GRAVITY = 16,
   JUMP_SPEED = 5.2,
@@ -69,6 +70,23 @@ let socket = null,
 
 // --- Menu ---
 $('nickname').value = localStorage.getItem(NAME_KEY) || '';
+let skin = SKINS.includes(localStorage.getItem(SKIN_KEY))
+  ? localStorage.getItem(SKIN_KEY)
+  : SKINS[Math.floor(Math.random() * SKINS.length)];
+for (const s of SKINS) {
+  const button = document.createElement('button'),
+    img = document.createElement('img');
+  img.src = `/models/characters/previews/character-${s}.png`;
+  img.alt = 'Personagem ' + s.toUpperCase();
+  button.append(img);
+  button.classList.toggle('on', s === skin);
+  button.onclick = () => {
+    skin = s;
+    localStorage.setItem(SKIN_KEY, s);
+    for (const b of $('skins').children) b.classList.toggle('on', b === button);
+  };
+  $('skins').append(button);
+}
 function nameInput() {
   const name = $('nickname').value.trim();
   if (!name) {
@@ -92,7 +110,8 @@ async function join(action) {
     lobbyLabel = lobby.code
       ? `Lobby privado · código <b>${lobby.code}</b>`
       : `Lobby público · grupo ${lobby.key.split('-')[1]}`;
-    socket = openLobbySocket(lobby.key, name, onMessage, onClose);
+    await preloadSkins([skin]);
+    socket = openLobbySocket(lobby.key, name, skin, onMessage, onClose);
   } catch (e) {
     $('menuError').textContent = e.message;
   } finally {
@@ -149,7 +168,7 @@ function syncAvatars(players) {
     seen.add(p.id);
     if (p.id === me.id) {
       if (!self) {
-        self = new Avatar({ name: p.name, color: p.color, self: true });
+        self = new Avatar({ name: p.name, color: p.color, skin: p.skin, self: true });
         scene.add(self.root);
         Object.assign(me, { x: p.x, z: p.z, yaw: p.yaw });
         camYaw = p.yaw + Math.PI;
@@ -159,7 +178,7 @@ function syncAvatars(players) {
     }
     let avatar = remotes.get(p.id);
     if (!avatar) {
-      avatar = new Avatar({ name: p.name, color: p.color });
+      avatar = new Avatar({ name: p.name, color: p.color, skin: p.skin });
       avatar.id = p.id;
       remotes.set(p.id, avatar);
       scene.add(avatar.root);

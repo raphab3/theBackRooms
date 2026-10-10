@@ -12,6 +12,8 @@ export const PORTAL_FULL_MS = 3000;
 export const PORTAL_TARGET_MS = 5000; // time do tamanho escolhido completo: parte em 5 s
 export const PARTY_MAX = 4;
 export const EMOTES = ['wave', 'point', 'dance'];
+// Personagens Kenney Blocky Characters (CC0): character-a … character-r.
+export const SKINS = 'abcdefghijklmnopqr'.split('');
 export const PORTALS = [
   { id: 'p1', x: -8, z: -10, level: 'backrooms' },
   { id: 'p2', x: 0, z: -10, level: 'backrooms' },

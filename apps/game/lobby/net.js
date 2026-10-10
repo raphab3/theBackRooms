@@ -19,10 +19,10 @@ export async function enterLobby(action, body) {
   return data;
 }
 
-export function openLobbySocket(key, name, onMessage, onClose) {
+export function openLobbySocket(key, name, skin, onMessage, onClose) {
   const scheme = location.protocol === 'http:' ? 'ws:' : 'wss:',
     ws = new WebSocket(
-      `${scheme}//${location.host}/api/lobby/${key}/ws?name=${encodeURIComponent(name)}`,
+      `${scheme}//${location.host}/api/lobby/${key}/ws?name=${encodeURIComponent(name)}&skin=${skin}`,
     );
   ws.onmessage = event => {
     try {

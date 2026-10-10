@@ -6,6 +6,7 @@ import {
   LOBBY_SPAWN,
   PARTY_MAX,
   RUN_SPEED,
+  SKINS,
   clampToLobby,
   newPortals,
   setPortalTarget,
@@ -66,9 +67,11 @@ class LobbyDO {
     if (this.players.size >= LOBBY_CAPACITY) throw new ApiError('Este lobby está cheio.', 409);
     const name = nameOf({ name: url.searchParams.get('name') }),
       used = [...this.players.values()].map(p => p.color),
+      skin = url.searchParams.get('skin'),
       player = {
         id: crypto.randomUUID(),
         name,
+        skin: SKINS.includes(skin) ? skin : SKINS[this.players.size % SKINS.length],
         color: colors.find(c => !used.includes(c)) || colors[this.players.size % colors.length],
       };
     const pair = new WebSocketPair(),
@@ -84,11 +87,12 @@ class LobbyDO {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  addPlayer({ id, name, color }) {
+  addPlayer({ id, name, color, skin }) {
     this.players.set(id, {
       id,
       name,
       color,
+      skin,
       x: LOBBY_SPAWN.x + (Math.random() - 0.5) * 4,
       z: LOBBY_SPAWN.z + (Math.random() - 0.5) * 2,
       yaw: Math.PI,
@@ -280,6 +284,7 @@ class LobbyDO {
         id: p.id,
         name: p.name,
         color: p.color,
+        skin: p.skin,
         x: Math.round(p.x * 100) / 100,
         z: Math.round(p.z * 100) / 100,
         yaw: Math.round(p.yaw * 1000) / 1000,
