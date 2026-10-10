@@ -8,7 +8,7 @@ import { finish, lock, phaseIntro, reset, resetMotion, say, start, updateHud } f
 import { enterLandscape } from './fullscreen.js';
 import { focusPad, padActive } from './gamepad.js';
 import { LEVEL_INFO } from './levels.js';
-import { missionSet, recordMissionWin } from './missions.js';
+import { enterExplorer, missionSet, recordMissionWin } from './missions.js';
 import { selectedMode, updateLevelButtons, updateModeButtons } from './modes.js';
 import { drawExplorer } from './render.js';
 import { updateRescueUI } from './revive.js';
@@ -156,6 +156,8 @@ async function resumeTravel() {
   $('nickname').value = travel.name || '';
   busyHome(true);
   try {
+    // Mesmo login de missões da tela "Quem vai explorar?", sem pedir o nome de novo.
+    await enterExplorer();
     const data = await requestRoom('resume', {
       code: travel.code,
       id: travel.id,

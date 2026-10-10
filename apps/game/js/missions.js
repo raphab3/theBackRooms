@@ -352,4 +352,12 @@ function setupMissions() {
   };
 }
 
-export { closeMissions, missionAdd, missionSet, recordMissionWin, setupMissions, trackMissions };
+export {
+  closeMissions,
+  enterExplorer,
+  missionAdd,
+  missionSet,
+  recordMissionWin,
+  setupMissions,
+  trackMissions,
+};
