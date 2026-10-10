@@ -184,7 +184,23 @@ const { default: vm } = await import('node:vm');
 const worldSource = (await readFile('public/world.js', 'utf8'))
   .replaceAll('export function', 'function')
   .replaceAll('export const', 'const');
-const gameSource = (await readFile('public/game.js', 'utf8')).replace(/^import [\s\S]*?;\n/, '');
+// Junta os módulos de public/js na mesma ordem em que o navegador os avalia (pós-ordem dos
+// imports a partir do main.js), sem import/export, para rodar como um único script na VM.
+async function bundleClient(file = 'main.js', seen = new Set(), out = []) {
+  if (seen.has(file)) return out;
+  seen.add(file);
+  const source = await readFile('public/js/' + file, 'utf8');
+  for (const [, dep] of source.matchAll(/^import [^;]*? from '\.\/([\w-]+\.js)';$/gm))
+    await bundleClient(dep, seen, out);
+  out.push(
+    source
+      .replace(/^import [^;]*? from '[^']+';\n/gm, '')
+      .replace(/^export \{[^}]*\};\n/gm, '')
+      .replace(/^export (?=const|let|function|class)/gm, ''),
+  );
+  return out;
+}
+const gameSource = (await bundleClient()).join('\n');
 function client() {
   let elements = {};
   let painting = new Proxy(
@@ -254,7 +270,9 @@ function client() {
   };
   vm.createContext(sandbox);
   vm.runInContext(worldSource + '\n' + gameSource, sandbox);
-  return { sandbox, elements, run: s => vm.runInContext(s, sandbox) };
+  // `with (game)` deixa os testes lerem e escreverem o estado compartilhado (state.js) pelo
+  // nome direto, como `state='playing'`, igual a quando tudo era um arquivo só.
+  return { sandbox, elements, run: s => vm.runInContext(`with (game) {\n${s}\n}`, sandbox) };
 }
 const joystickClient = client();
 joystickClient.run("state='playing'");
