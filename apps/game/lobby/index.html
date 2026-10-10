@@ -59,10 +59,15 @@
         <input id="chatInput" maxlength="240" placeholder="Enter para conversar" hidden />
       </div>
       <div id="stick"><div id="knob"></div></div>
-      <div id="touchButtons">
-        <button data-key="jump">⤒</button>
-        <button data-key="wave">👋</button>
-        <button data-key="chat">💬</button>
+      <div id="actions">
+        <button data-action="jump" title="Pular (Espaço)"><span>⤒</span><kbd>Espaço</kbd></button>
+        <button data-action="wave" title="Acenar (1)"><span>👋</span><kbd>1</kbd></button>
+        <button data-action="point" title="Apontar (2)"><span>👉</span><kbd>2</kbd></button>
+        <button data-action="dance" title="Dançar (3)"><span>💃</span><kbd>3</kbd></button>
+        <button data-action="chat" title="Conversar (Enter)">
+          <span>💬</span><kbd>Enter</kbd>
+        </button>
+        <button data-action="party" title="Sair do grupo (G)"><span>🚪</span><kbd>G</kbd></button>
       </div>
     </section>
 

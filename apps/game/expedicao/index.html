@@ -38,12 +38,25 @@
       <div id="bag"></div>
       <div id="prompt" hidden></div>
       <div id="stick"><div id="knob"></div></div>
-      <div id="touchButtons">
-        <button id="fire">🔥</button>
-        <button id="use">E</button>
-        <button data-key="run">🏃</button>
-        <button data-key="light">🔦</button>
-        <button data-key="revive">♥</button>
+      <div id="actions">
+        <button data-action="fire" title="Atirar (segure para carregar) (Clique)">
+          <span>🔥</span><kbd>Clique</kbd>
+        </button>
+        <button data-action="use" title="Desmontar sucata (segure) (E)">
+          <span>🔩</span><kbd>E</kbd>
+        </button>
+        <button data-action="run" title="Correr (Shift)"><span>🏃</span><kbd>Shift</kbd></button>
+        <button data-action="light" title="Lanterna (F)"><span>🔦</span><kbd>F</kbd></button>
+        <button data-action="revive" title="Reviver a equipe (25 moedas) (V)">
+          <span>♥</span><kbd>V</kbd>
+        </button>
+        <button data-action="chat" title="Conversar (Enter)">
+          <span>💬</span><kbd>Enter</kbd>
+        </button>
+      </div>
+      <div id="chat">
+        <ul id="chatLog"></ul>
+        <input id="chatInput" maxlength="240" placeholder="Enter para conversar" hidden />
       </div>
     </section>
 

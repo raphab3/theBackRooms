@@ -8,7 +8,7 @@ export function createStats(renderer, pipeline) {
   Object.assign(el.style, {
     position: 'fixed',
     top: '50%',
-    right: '12px',
+    left: '12px',
     transform: 'translateY(-50%)',
     margin: '0',
     padding: '8px 10px',

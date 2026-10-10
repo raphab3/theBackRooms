@@ -133,12 +133,24 @@
   background: var(--accent);
   width: 0;
 }
+#chat {
+  left: 12px;
+  bottom: 60px;
+}
 @media (pointer: coarse) {
   #bag {
     grid-template-columns: repeat(6, 30px);
-    bottom: 210px;
+    bottom: 140px;
     left: auto;
-    right: 12px;
+    right: 16px;
     transform: none;
+  }
+  #team {
+    display: none;
+  }
+  #chat {
+    left: 50%;
+    top: 12px;
+    transform: translateX(-50%);
   }
 }

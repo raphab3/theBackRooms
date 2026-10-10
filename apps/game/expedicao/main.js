@@ -7,6 +7,7 @@ import { ITEMS, SALVAGE_MS, SALVAGE_REACH, countItem } from '@backrooms/shared/l
 import { createWorld } from '@backrooms/shared/world.js';
 import { Avatar } from '../lobby/avatar.js';
 import { createHum } from '../lobby/hum.js';
+import { setupLandscape } from '../lobby/landscape.js';
 import { RemoteBuffer } from '../lobby/net.js';
 import { bindQualitySelect, createPipeline } from '../lobby/quality.js';
 import { createStats } from '../lobby/stats.js';
@@ -216,6 +217,7 @@ function applyRoom(next, first = false) {
   );
   syncRemotes();
   renderHud();
+  renderChat();
   // Tiros dos colegas (os meus já foram desenhados na hora do clique).
   for (const e of room.effects || []) {
     if (seenEffects.has(e.id)) continue;
@@ -375,6 +377,7 @@ function stepSalvage(now) {
 
 // --- Entrada: teclado, botão direito/arrastar gira, joystick no celular ---
 addEventListener('keydown', e => {
+  if (e.key === 'Enter' && room && !ended) return openChat();
   if (e.code === 'Space' && !e.repeat) startCharge();
   if (e.code === 'KeyE' && !e.repeat) startSalvage();
   keys.add(e.code);
@@ -433,26 +436,72 @@ for (const type of ['pointerup', 'pointercancel'])
     stick = { x: 0, y: 0 };
     knob.style.transform = '';
   });
-const useButton = $('use');
-useButton.addEventListener('pointerdown', e => {
+// Barra de ações: tocar/clicar faz o mesmo que a tecla; atirar e desmontar respeitam o segurar.
+const holdActions = {
+  fire: [startCharge, releaseShot],
+  use: [startSalvage, stopSalvage],
+};
+const ACTIONS = {
+  run: b => b.classList.toggle('on', (touchRun = !touchRun)),
+  light: () => (lantern.visible = !lantern.visible),
+  revive: () => send('revive'),
+  chat: () => openChat(),
+};
+for (const b of document.querySelectorAll('#actions button')) {
+  const hold = holdActions[b.dataset.action];
+  if (hold) {
+    b.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      hold[0]();
+    });
+    b.addEventListener('pointerup', hold[1]);
+    b.addEventListener('pointercancel', hold[1]);
+    b.addEventListener('pointerleave', hold[1]);
+  } else
+    b.onclick = e => {
+      e.currentTarget.blur();
+      ACTIONS[b.dataset.action]?.(b);
+    };
+}
+
+// --- Chat da equipe (mensagens da sala) ---
+function openChat() {
+  $('chatInput').hidden = false;
+  $('chatInput').focus();
+  keys.clear();
+}
+$('chatInput').addEventListener('keydown', e => {
   e.stopPropagation();
-  startSalvage();
+  if (e.key === 'Enter') {
+    const text = $('chatInput').value.trim();
+    if (text) send('chat', { text, messageId: crypto.randomUUID() });
+    $('chatInput').value = '';
+  }
+  if (e.key === 'Enter' || e.key === 'Escape') {
+    $('chatInput').hidden = true;
+    $('chatInput').blur();
+  }
 });
-useButton.addEventListener('pointerup', stopSalvage);
-useButton.addEventListener('pointercancel', stopSalvage);
-const fireButton = $('fire');
-fireButton.addEventListener('pointerdown', e => {
-  e.stopPropagation();
-  startCharge();
-});
-fireButton.addEventListener('pointerup', releaseShot);
-fireButton.addEventListener('pointercancel', releaseShot);
-for (const b of document.querySelectorAll('#touchButtons button[data-key]'))
-  b.onclick = () => {
-    if (b.dataset.key === 'run') touchRun = !touchRun;
-    if (b.dataset.key === 'light') lantern.visible = !lantern.visible;
-    if (b.dataset.key === 'revive') send('revive');
-  };
+$('chatInput').addEventListener('keyup', e => e.stopPropagation());
+const seenMessages = new Set();
+function renderChat() {
+  const messages = (room.messages || []).slice(-8);
+  for (const m of messages) {
+    if (seenMessages.has(m.id)) continue;
+    seenMessages.add(m.id);
+    if (m.sender !== ticket.id) remotes.get(m.sender)?.say(m.text, performance.now());
+  }
+  $('chatLog').replaceChildren(
+    ...messages.map(m => {
+      const li = document.createElement('li'),
+        who = document.createElement('b');
+      who.textContent = m.name + ': ';
+      who.style.color = m.color;
+      li.append(who, document.createTextNode(m.text));
+      return li;
+    }),
+  );
+}
 
 // --- Simulação local (o servidor confere velocidade e paredes) ---
 const open = (x, y) => world.grid[Math.floor(y)]?.[Math.floor(x)] === 0;
@@ -541,4 +590,5 @@ function frame(now) {
   stats.end(frameMs, now);
 }
 requestAnimationFrame(frame);
+setupLandscape();
 void start();

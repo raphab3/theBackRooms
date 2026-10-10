@@ -5,6 +5,7 @@ import { LOBBY_BOUNDS, RUN_SPEED, SKINS } from '@backrooms/shared/lobby.js';
 import { Avatar, preloadSkins } from './avatar.js';
 import { RemoteBuffer, enterLobby, openLobbySocket } from './net.js';
 import { createHum } from './hum.js';
+import { enterLandscape, setupLandscape } from './landscape.js';
 import { bindQualitySelect, createPipeline } from './quality.js';
 import { createStats } from './stats.js';
 import { PILLARS, PILLAR_RADIUS, animateLobby, buildLobby } from './scene.js';
@@ -106,6 +107,7 @@ function nameInput() {
   return name;
 }
 async function join(action) {
+  void enterLandscape(); // o clique em "Entrar" é o gesto que o navegador exige
   $('menuError').textContent = '';
   try {
     const name = nameInput(),
@@ -373,9 +375,20 @@ const releaseStick = () => {
 };
 stickEl.addEventListener('pointerup', releaseStick);
 stickEl.addEventListener('pointercancel', releaseStick);
-for (const b of document.querySelectorAll('#touchButtons button'))
-  b.onclick = () =>
-    b.dataset.key === 'jump' ? jump() : b.dataset.key === 'chat' ? openChat() : emote('wave');
+// Barra de ações (mesmas ações do teclado; no celular é o único jeito de usá-las).
+const ACTIONS = {
+  jump,
+  wave: () => emote('wave'),
+  point: () => emote('point'),
+  dance: () => emote('dance'),
+  chat: () => openChat(),
+  party: () => socket?.send({ t: 'leaveParty' }),
+};
+for (const b of document.querySelectorAll('#actions button'))
+  b.onclick = e => {
+    e.currentTarget.blur(); // Enter/Espaço não podem "clicar" o botão de novo pelo teclado
+    ACTIONS[b.dataset.action]?.();
+  };
 
 // --- Simulação local ---
 function collide() {
@@ -495,4 +508,5 @@ function frame(now) {
   stats.end(frameMs, now);
 }
 requestAnimationFrame(frame);
+setupLandscape();
 returnToLobby();

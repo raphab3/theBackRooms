@@ -272,9 +272,57 @@ button.primary {
   color: var(--accent);
 }
 
-#stick,
-#touchButtons {
+/* Barra de ações: no computador, coluna à direita com a tecla de cada ação; no celular, botões
+   redondos maiores (as teclas somem) e o joystick à esquerda. */
+#actions {
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#actions button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 112px;
+  padding: 6px 10px;
+  background: var(--panel);
+  font-size: 18px;
+}
+#actions button.on {
+  border-color: var(--accent);
+}
+#actions kbd {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid #6b6238;
+  border-radius: 4px;
+  font: 11px monospace;
+  color: var(--muted);
+}
+#stick {
   display: none;
+}
+#rotateGate {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  background: #1b1a12;
+  text-align: center;
+}
+#rotateGate .rotateIcon {
+  font-size: 56px;
+}
+#rotateGate small {
+  color: var(--muted);
 }
 @media (pointer: coarse) {
   #help {
@@ -282,8 +330,8 @@ button.primary {
   }
   #stick {
     display: block;
-    left: 24px;
-    bottom: 120px;
+    left: 20px;
+    bottom: 20px;
     width: 120px;
     height: 120px;
     border-radius: 50%;
@@ -299,21 +347,36 @@ button.primary {
     border-radius: 50%;
     background: rgb(255 255 255 / 35%);
   }
-  #touchButtons {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    right: 20px;
-    bottom: 120px;
+  #actions {
+    top: auto;
+    bottom: 16px;
+    right: 16px;
+    transform: none;
+    display: grid;
+    grid-template-columns: repeat(3, 52px);
+    gap: 8px;
   }
-  #touchButtons button {
-    width: 56px;
-    height: 56px;
+  #actions button {
+    min-width: 0;
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    justify-content: center;
     border-radius: 50%;
     font-size: 22px;
-    padding: 0;
   }
+  #actions kbd {
+    display: none;
+  }
+  /* Deitado sobra pouca altura: o chat sobe para o topo, longe do joystick. */
   #chat {
-    width: min(300px, calc(100% - 120px));
+    top: 52px;
+    bottom: auto;
+    width: min(300px, calc(100% - 220px));
+  }
+  #settings {
+    top: 12px;
+    bottom: auto;
+    right: 12px;
   }
 }
