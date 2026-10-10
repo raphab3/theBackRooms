@@ -12,8 +12,11 @@ Cada ponto: `index1` = código da sala, `blob1` = evento, `double1` = valor.
 | `players`      | jogadores conectados           | no DO, em `upgrade` e `afterDisconnect`: `recordPlayers`       |
 | `socket_error` | 1 (blob2 = motivo)             | no DO, em `webSocketError` e falhas de mensagem                |
 
-Observação: dentro de um Worker o relógio só avança em I/O; o tick (CPU puro) tende a aparecer como 0 ms.
-Para o aceite "tick p99 < 5 ms", confirme também pelo `wrangler tail`/métricas de CPU time do DO.
+**Fonte do aceite "tick p99 < 5 ms":** o evento `tick` medido com `performance.now()` dentro do Worker
+não serve de prova — o relógio só avança em I/O e o tick (CPU puro) aparece como 0 ms. A fonte real é o
+CPU time do DO: `wrangler tail backrooms --format json` (campo `cpuTime` por invocação) ou o painel
+Workers & Pages → Metrics → Durable Objects (CPU time p99). O evento `tick` fica como sinal auxiliar
+(detecta tick que passa por I/O/GC), não como evidência do aceite.
 
 Consultas (SQL API do Analytics Engine):
 
