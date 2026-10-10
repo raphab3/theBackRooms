@@ -119,6 +119,7 @@ async function start() {
     applyRoom(data.room, true);
     world = createWorld(room.seed, room.level);
     level = buildLevel(scene, world);
+    pipeline.warm();
     connect();
     $('loading').hidden = true;
     $('hud').hidden = false;
@@ -184,6 +185,7 @@ function syncRemotes() {
     seen.add(p.id);
     if (!remotes.has(p.id)) {
       const avatar = new Avatar({ name: p.name, color: p.color, skin: p.skin || 'a' });
+      void avatar.ready.then(() => pipeline.warm({ passes: false }));
       remotes.set(p.id, avatar);
       scene.add(avatar.root);
     }

@@ -38,6 +38,7 @@ const scene = new THREE.Scene(),
   pipeline = createPipeline(renderer, scene, camera),
   hum = createHum();
 bindQualitySelect($('quality'), pipeline);
+pipeline.warm();
 const stats = createStats(renderer, pipeline);
 hum.set(0.5);
 function resize() {
@@ -195,6 +196,7 @@ function syncAvatars(players) {
     if (p.id === me.id) {
       if (!self) {
         self = new Avatar({ name: p.name, color: p.color, skin: p.skin, self: true });
+        void self.ready.then(() => pipeline.warm());
         scene.add(self.root);
         Object.assign(me, { x: p.x, z: p.z, yaw: p.yaw });
         camYaw = p.yaw + Math.PI;
@@ -433,9 +435,11 @@ function stepSelf(dt, now) {
   self.update(dt, { speed, anim: me.anim, emote: me.emote, jumpY: me.y }, now);
 }
 
+const cameraTarget = new THREE.Vector3(),
+  cameraDesired = new THREE.Vector3();
 function updateCamera(dt) {
-  const target = new THREE.Vector3(me.x, 1.6 + me.y * 0.5, me.z),
-    desired = new THREE.Vector3(
+  const target = cameraTarget.set(me.x, 1.6 + me.y * 0.5, me.z),
+    desired = cameraDesired.set(
       me.x + Math.sin(camYaw) * Math.cos(camPitch) * CAMERA_DISTANCE,
       1.6 + Math.sin(camPitch) * CAMERA_DISTANCE,
       me.z + Math.cos(camYaw) * Math.cos(camPitch) * CAMERA_DISTANCE,

@@ -112,6 +112,10 @@ export function buildLevel(scene, world) {
     world.coins.length,
   );
   scene.add(coinMesh);
+  const coinPos = new THREE.Vector3(),
+    coinTurn = new THREE.Quaternion(),
+    coinEuler = new THREE.Euler(),
+    zero = new THREE.Vector3(0, 0, 0);
 
   // Saída: porta escura com moldura que fica verde quando os fusíveis estão completos.
   const exit = new THREE.Group(),
@@ -152,16 +156,12 @@ export function buildLevel(scene, world) {
       const ready = room.fuses.every(Boolean);
       frameMaterial.color.set(ready ? 0x3ad17a : 0x7a2a1a);
       const hidden = new Set(room.collectedCoins);
-      world.coins.forEach((c, i) =>
-        coinMesh.setMatrixAt(
-          i,
-          m.compose(
-            new THREE.Vector3(c.x * S, 0.6 + Math.sin(t * 3 + i) * 0.05, c.y * S),
-            new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, t * 2 + i)),
-            hidden.has(c.id) ? new THREE.Vector3(0, 0, 0) : one,
-          ),
-        ),
-      );
+      // Objetos reaproveitados: criar 3 por moeda a cada quadro gerava lixo e travadas de GC.
+      world.coins.forEach((c, i) => {
+        coinPos.set(c.x * S, 0.6 + Math.sin(t * 3 + i) * 0.05, c.y * S);
+        coinTurn.setFromEuler(coinEuler.set(Math.PI / 2, 0, t * 2 + i));
+        coinMesh.setMatrixAt(i, m.compose(coinPos, coinTurn, hidden.has(c.id) ? zero : one));
+      });
       coinMesh.instanceMatrix.needsUpdate = true;
       for (const i of flickering) {
         const v = Math.sin(t * 7 + i * 13) * Math.sin(t * 1.3 + i);

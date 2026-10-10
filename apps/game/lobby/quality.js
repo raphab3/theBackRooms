@@ -10,7 +10,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 const KEY = 'backrooms.quality',
   MEASURE_MS = 5000,
   SLOW_FRAME_MS = 20,
-  FAST_FRAME_MS = 12;
+  FAST_FRAME_MS = 12,
+  RESIZE_COOLDOWN_MS = 10000; // recriar os alvos do pós-processamento também custa um quadro
 export const PRESETS = {
   low: { label: 'Baixa', ratio: 0.75, bloom: false, film: false },
   medium: { label: 'Média', ratio: 1, bloom: false, film: true },
@@ -58,7 +59,8 @@ export function createPipeline(renderer, scene, camera) {
     measureStart = 0,
     frames = 0,
     slowFor = 0,
-    fastFor = 0;
+    fastFor = 0,
+    resizedAt = 0;
 
   function apply(name) {
     preset = name;
@@ -84,6 +86,18 @@ export function createPipeline(renderer, scene, camera) {
       return ratio;
     },
     resize,
+    /**
+     * Compila agora os shaders da cena e de todos os passes, para a primeira aparição de algo (ou a
+     * troca automática de qualidade) não travar um quadro inteiro no meio do jogo.
+     */
+    warm({ passes = true } = {}) {
+      renderer.compile(scene, camera);
+      if (!passes) return;
+      const was = [bloom.enabled, film.enabled];
+      bloom.enabled = film.enabled = true;
+      composer.render();
+      [bloom.enabled, film.enabled] = was;
+    },
     /** Troca manual (ou volta para "auto") e lembra no aparelho. */
     choose(name) {
       try {
@@ -113,13 +127,16 @@ export function createPipeline(renderer, scene, camera) {
         slowFor = dtMs > SLOW_FRAME_MS ? slowFor + dtMs : 0;
         fastFor = dtMs < FAST_FRAME_MS ? fastFor + dtMs : 0;
         const max = Math.min(devicePixelRatio, PRESETS[preset].ratio);
-        if (slowFor > 2000 && ratio > 0.5) {
+        const canResize = now - resizedAt > RESIZE_COOLDOWN_MS;
+        if (canResize && slowFor > 2000 && ratio > 0.5) {
           ratio = Math.max(0.5, ratio * 0.9);
           slowFor = 0;
+          resizedAt = now;
           resize();
-        } else if (fastFor > 5000 && ratio < max) {
+        } else if (canResize && fastFor > 5000 && ratio < max) {
           ratio = Math.min(max, ratio / 0.9);
           fastFor = 0;
+          resizedAt = now;
           resize();
         }
       }

@@ -1,5 +1,6 @@
 // Painel de desempenho (F3 ou ?stats): FPS médio, "1% pior" (critério do portão da Fase 1),
-// tempo de quadro, chamadas de desenho, triângulos, preset e resolução. Janela dos últimos 10 s.
+// tempo de quadro, travadas (> 50 ms), chamadas de desenho, triângulos, preset e resolução.
+// Janela dos últimos 10 s.
 const WINDOW = 600; // quadros
 
 export function createStats(renderer, pipeline) {
@@ -55,6 +56,7 @@ export function createStats(renderer, pipeline) {
         `FPS médio   ${(1000 / avg).toFixed(0)}`,
         `1% pior     ${(1000 / worstAvg).toFixed(0)} fps`,
         `quadro      ${avg.toFixed(1)} ms (máx ${sorted[0].toFixed(1)})`,
+        `travadas    ${frames.filter(f => f > 50).length} acima de 50 ms`,
         `draw calls  ${calls}`,
         `triângulos  ${(triangles / 1000).toFixed(1)} mil`,
         `qualidade   ${pipeline.preset} · ${pipeline.ratio.toFixed(2)}x`,
