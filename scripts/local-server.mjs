@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, sep } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { api } from '../worker/index.js';
+import { createLocalRooms } from '../worker/local-rooms.js';
 const root = fileURLToPath(new URL('../', import.meta.url)),
   publicDir = resolve(root, 'public');
 await mkdir(resolve(root, 'data'), { recursive: true });
@@ -45,6 +46,7 @@ const DB = {
     };
   },
 };
+const ROOMS = createLocalRooms();
 const port = Number(process.env.PORT || 3000),
   types = {
     html: 'text/html; charset=utf-8',
@@ -80,7 +82,7 @@ const server = createServer(async (req, res) => {
           headers: req.headers,
           ...(!['GET', 'HEAD'].includes(req.method) ? { body } : {}),
         }),
-        { DB },
+        { DB, ROOMS },
       );
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(Buffer.from(await response.arrayBuffer()));

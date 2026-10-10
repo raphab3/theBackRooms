@@ -3,7 +3,7 @@ import { ApiError } from './http.js';
 import { adminName, authorize, nameOf } from './players.js';
 import { validatedLevel } from './rooms.js';
 
-async function globalLeaderboard(db, action, body) {
+async function globalLeaderboard(db, action, body, getRoom) {
   if (action === 'top') {
     const rows = await db
       .prepare(
@@ -17,9 +17,7 @@ async function globalLeaderboard(db, action, body) {
   let name = nameOf(body),
     milliseconds = body.milliseconds;
   if (body.code) {
-    const row = await db.prepare('SELECT state FROM rooms WHERE code=?').bind(body.code).first();
-    if (!row) throw new ApiError('Sala não encontrada.', 404);
-    const room = JSON.parse(row.state),
+    const room = await getRoom(body.code),
       p = authorize(room, body);
     if (
       room.adminUsed ||

@@ -17,4 +17,8 @@
       "migrations_dir": "drizzle",
     },
   ],
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RoomDO" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
 }

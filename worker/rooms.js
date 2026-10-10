@@ -180,33 +180,6 @@ function safeRoom(room, now) {
     capacity: MAX_PLAYERS,
   };
 }
-async function mutate(db, code, action) {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const row = await db
-      .prepare('SELECT state,revision,updated_at FROM rooms WHERE code=?')
-      .bind(code)
-      .first();
-    if (!row || Date.now() - row.updated_at > TTL)
-      throw new ApiError('Sala não encontrada ou expirada. Confira o código.', 404);
-    const room = JSON.parse(row.state),
-      now = Date.now();
-    tickRoom(room, now);
-    const extra = action(room, now) || {};
-    if (room.status === 'won') {
-      if (!Number.isFinite(room.finished) || room.finished <= room.started) room.finished = now;
-    } else room.finished = 0;
-    const result = await db
-      .prepare(
-        'UPDATE rooms SET state=?,revision=revision+1,updated_at=? WHERE code=? AND revision=?',
-      )
-      .bind(JSON.stringify(room), now, code, row.revision)
-      .run();
-    if (result.meta.changes)
-      return { ...extra, room: { ...safeRoom(room, now), revision: row.revision + 1 } };
-  }
-  throw new ApiError('A sala está ocupada. Tente novamente.', 409);
-}
-
 function validateMovement(room, p, body, now, previousSeen) {
   const reject = reason => ({ accepted: false, reason, ackMovement: p.moveOrdinal || 0 });
   if (body.respawns !== undefined && body.respawns !== (p.respawns || 0)) return reject('respawn');
@@ -274,7 +247,7 @@ export {
   TTL,
   beginPhase,
   distance,
-  mutate,
+  tickRoom,
   safeRoom,
   validateMovement,
   validatedLevel,

@@ -2,8 +2,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFile, readdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { api } from '../worker/index.js';
+import { createLocalRooms } from '../worker/local-rooms.js';
 import { createWorld, findRoute, PHASE_ORDER, phaseFuseCount } from '../public/world.js';
 const sqlite = new DatabaseSync(':memory:');
+const ROOMS = createLocalRooms();
 for (const f of await readdir('drizzle'))
   if (f.endsWith('.sql')) sqlite.exec(await readFile('drizzle/' + f, 'utf8'));
 const DB = {
@@ -33,7 +35,7 @@ async function call(action, body, expected = 200) {
       headers: { 'Content-Type': 'application/json', Origin: 'https://game.test' },
       body: JSON.stringify(body),
     }),
-    { DB },
+    { DB, ROOMS },
   );
   const d = await r.json();
   assert.equal(r.status, expected, JSON.stringify(d));
@@ -46,7 +48,7 @@ async function rankCall(action, body, expected = 200) {
       headers: { 'Content-Type': 'application/json', Origin: 'https://game.test' },
       body: JSON.stringify(body),
     }),
-    { DB },
+    { DB, ROOMS },
   );
   const d = await r.json();
   assert.equal(r.status, expected, JSON.stringify(d));
@@ -56,10 +58,7 @@ function payload(p, extra = {}) {
   return { code: p.room.code, id: p.id, token: p.token, ...extra };
 }
 function modifyRoom(code, fn) {
-  const row = sqlite.prepare('SELECT state FROM rooms WHERE code=?').get(code);
-  let room = JSON.parse(row.state);
-  fn(room);
-  sqlite.prepare('UPDATE rooms SET state=? WHERE code=?').run(JSON.stringify(room), code);
+  fn(ROOMS.instances.get(code).room);
 }
 const complete = { completed: true, phases: PHASE_ORDER.length, level: PHASE_ORDER.at(-1) };
 await rankCall('submit', { name: 'Incompleto', milliseconds: 20000, level: 'backrooms' }, 409);
@@ -173,7 +172,7 @@ const bad = await api(
     headers: { Origin: 'https://evil.test' },
     body: '{}',
   }),
-  { DB },
+  { DB, ROOMS },
 );
 assert.equal(bad.status, 403);
 console.log(
@@ -266,7 +265,7 @@ function client() {
       addEventListener() {},
       body: element('body'),
     },
-    fetch: (url, init) => api(new Request('https://game.test' + url, init), { DB }),
+    fetch: (url, init) => api(new Request('https://game.test' + url, init), { DB, ROOMS }),
   };
   vm.createContext(sandbox);
   vm.runInContext(worldSource + '\n' + gameSource, sandbox);
@@ -460,7 +459,7 @@ async function globalCall(action, body, status = 200) {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-    { DB },
+    { DB, ROOMS },
   );
   assert.equal(r.status, status);
   return r.json();
@@ -573,14 +572,14 @@ const concurrent = await Promise.all([
       method: 'POST',
       body: JSON.stringify(payload(ch)),
     }),
-    { DB },
+    { DB, ROOMS },
   ),
   api(
     new Request('https://game.test/api/rooms/revive', {
       method: 'POST',
       body: JSON.stringify(payload(cp)),
     }),
-    { DB },
+    { DB, ROOMS },
   ),
 ]);
 assert.deepEqual(concurrent.map(r => r.status).sort(), [200, 409]);
@@ -1483,7 +1482,7 @@ async function maps(action, body = {}, expected = 200) {
       headers: { Origin: 'https://game.test', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-    { DB },
+    { DB, ROOMS },
   );
   const d = await r.json();
   assert.equal(r.status, expected, JSON.stringify(d));
@@ -1496,7 +1495,7 @@ const mkSession = async name =>
         method: 'POST',
         body: JSON.stringify({ name }),
       }),
-      { DB },
+      { DB, ROOMS },
     )
   ).json();
 const editorSession = await mkSession('Construtor A'),

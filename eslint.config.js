@@ -18,8 +18,8 @@ export default [
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ['worker/**/*.js'],
-    languageOptions: { globals: globals.serviceworker },
+    files: ['worker/**/*.js', 'tests/**/*.test.js'],
+    languageOptions: { globals: { ...globals.serviceworker, WebSocketPair: 'readonly' } },
   },
   {
     files: ['scripts/**/*.mjs', 'tests/**/*.mjs', '*.config.js'],
