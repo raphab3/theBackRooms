@@ -1,7 +1,7 @@
 // Seleção de modo (Normal/Hardcore) e de fase.
 import { $ } from './dom.js';
 import { reset } from './engine.js';
-import { applySnapshot, isAdmin, net, requestRoom, roomPayload, showLobby } from './net.js';
+import { isAdmin, net, sendAction, showLobby } from './net.js';
 import { game } from './state.js';
 
 let selectedMode = 'normal',
@@ -54,11 +54,8 @@ async function selectMode(mode, place = 'home') {
   modeBusy = true;
   updateModeButtons();
   try {
-    const data = await requestRoom('mode', { ...roomPayload(), mode });
-    if (net === session) {
-      applySnapshot(data);
-      showLobby();
-    }
+    sendAction('mode', { mode });
+    if (net === session) showLobby();
   } catch (e) {
     $('lobbyStatus').textContent = e.message;
   } finally {

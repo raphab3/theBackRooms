@@ -4,7 +4,7 @@ import { builder } from './builder.js';
 import { $ } from './dom.js';
 import { lock, resetMotion, say } from './engine.js';
 import { missionAdd, missionSet } from './missions.js';
-import { applySnapshot, isAdmin, net, requestRoom, roomPayload, showPanel } from './net.js';
+import { isAdmin, net, sendAction, showPanel } from './net.js';
 import { game } from './state.js';
 
 function updateRescueUI() {
@@ -55,9 +55,8 @@ async function reviveAll() {
     game.reviveBusy = true;
     updateRescueUI();
     try {
-      const data = await requestRoom('revive', roomPayload());
+      sendAction('revive');
       if (net !== session) return;
-      applySnapshot(data);
       missionAdd('rescues');
       feedback('Equipe revivida! 25 moedas utilizadas.');
     } catch (e) {

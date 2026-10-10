@@ -21,13 +21,12 @@ import { LEVEL_INFO } from './levels.js';
 import { closeMissions, recordMissionWin, trackMissions } from './missions.js';
 import { selectedMode, updateModeUI } from './modes.js';
 import {
-  interpolateRemote,
   net,
-  recordMovement,
-  resetMovementTrail,
+  recordPrediction,
   resumeOnline,
   showLobby,
   showPanel,
+  updateRemotePlayers,
 } from './net.js';
 import { makeTextures, render } from './render.js';
 import { reviveAll, updateRescueUI } from './revive.js';
@@ -143,7 +142,6 @@ function reset(
   game.light = true;
   game.viewPitch = 0;
   game.keys = {};
-  resetMovementTrail();
   updateHud();
   updateRescueUI();
   updateModeUI();
@@ -379,7 +377,9 @@ function update(dt) {
       ? 100
       : Math.max(0, Math.min(100, game.stamina + dt * (run ? -24 : 15)));
   smoothWalk(forward, side, speed, dt);
-  recordMovement();
+  const length = Math.max(1, Math.hypot(forward, side));
+  game.input = { dx: side / length, dy: forward / length, run: !!run };
+  recordPrediction();
   if (moving) {
     stepTimer -= dt;
     if (stepTimer < 0) {
@@ -488,7 +488,7 @@ function update(dt) {
 }
 let last = performance.now();
 function tick(now) {
-  interpolateRemote(now);
+  updateRemotePlayers(now);
   let dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   pollController(now);

@@ -203,6 +203,8 @@ async function bundleClient(file = 'main.js', seen = new Set(), out = []) {
 const gameSource = (await bundleClient()).join('\n');
 function client() {
   let elements = {};
+  const sockets = [],
+    pending = [];
   let painting = new Proxy(
     { createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) },
     { get: (o, k) => o[k] || (() => {}) },
@@ -255,8 +257,54 @@ function client() {
       return 1;
     },
     clearTimeout() {},
+    setInterval() {
+      return 1;
+    },
+    clearInterval() {},
+    WebSocket: class {
+      constructor(url) {
+        this.url = url;
+        this.readyState = 1;
+        this.sent = [];
+        sockets.push(this);
+        queueMicrotask(() => this.onopen?.());
+      }
+      // Faz o papel do RoomDO: traduz o protocolo WebSocket para a API REST do servidor de teste.
+      send(text) {
+        const msg = JSON.parse(text);
+        this.sent.push(msg);
+        if (msg.t === 'input') return;
+        if (msg.t === 'hello') this.token = msg.token;
+        const action = {
+          start: 'start',
+          revive: 'revive',
+          level: 'admin-level',
+          mode: 'mode',
+          leave: 'leave',
+        }[msg.kind];
+        // O WebSocket entrega em ordem: as respostas do servidor falso também.
+        const me = run('({id:net.id,round:net.room.round})');
+        pending.push(
+          (this.chain = (this.chain ?? Promise.resolve()).then(async () => {
+            const data = await call(action ?? 'sync', {
+              code: this.url.split('/')[5],
+              id: me.id,
+              token: this.token,
+              round: me.round,
+              ...(msg.kind === 'level' ? { level: msg.level } : {}),
+              ...(msg.kind === 'mode' ? { mode: msg.mode } : {}),
+            });
+            if (action !== 'leave')
+              this.onmessage?.({ data: JSON.stringify({ t: 'welcome', v: 1, room: data.room }) });
+          })),
+        );
+      }
+      close() {
+        this.readyState = 3;
+      }
+    },
     matchMedia: () => ({ matches: true }),
-    location: { origin: 'https://game.test', search: '' },
+    location: { origin: 'https://game.test', search: '', protocol: 'https:', host: 'game.test' },
     navigator: {},
     window: { addEventListener() {} },
     document: {
@@ -272,7 +320,19 @@ function client() {
   vm.runInContext(worldSource + '\n' + gameSource, sandbox);
   // `with (game)` deixa os testes lerem e escreverem o estado compartilhado (state.js) pelo
   // nome direto, como `state='playing'`, igual a quando tudo era um arquivo só.
-  return { sandbox, elements, run: s => vm.runInContext(`with (game) {\n${s}\n}`, sandbox) };
+  // Quem `await`a uma chamada assíncrona do cliente também espera as respostas do servidor falso.
+  function run(s) {
+    const result = vm.runInContext(`with (game) {\n${s}\n}`, sandbox);
+    return typeof result?.then === 'function'
+      ? result.then(async value => (await Promise.all(pending.splice(0)), value))
+      : result;
+  }
+  // Equivale a esperar o servidor mandar o estado atual da sala (o `welcome` de uma reconexão).
+  async function pull() {
+    sockets.at(-1).send(JSON.stringify({ t: 'hello', v: 1, token: run('net.token') }));
+    await Promise.all(pending.splice(0));
+  }
+  return { sandbox, elements, sockets, run, pull };
 }
 const joystickClient = client();
 joystickClient.run("state='playing'");
@@ -344,10 +404,10 @@ assert.equal(a.run('state'), 'lobby');
 b.run("document.getElementById('nickname').value='Mobile'");
 b.sandbox.document.getElementById('roomCode').value = sharedCode;
 await b.run("connectRoom('join')");
-await a.run('syncRoom()');
+await a.pull();
 assert.equal(a.run('net.room.players.length'), 2);
 await a.run('launchRoom()');
-await b.run('syncRoom()');
+await b.pull();
 assert.equal(a.run('state'), 'playing');
 assert.equal(b.run('state'), 'playing');
 assert.equal(a.run('sceneRound'), b.run('sceneRound'));
@@ -357,7 +417,7 @@ assert.equal(a.run('state'), 'paused');
 a.run('resumeOnline()');
 assert.equal(a.run('state'), 'playing');
 await a.run('leaveRoom()');
-await b.run('syncRoom()');
+await b.pull();
 assert.equal(b.run('net.room.host'), b.run('net.id'));
 await b.run('leaveRoom()');
 assert.equal(b.run('net'), null);
@@ -614,9 +674,9 @@ await ca.run("connectRoom('create')");
 cb.run("document.getElementById('nickname').value='B'");
 cb.sandbox.document.getElementById('roomCode').value = ca.run('net.code');
 await cb.run("connectRoom('join')");
-await ca.run('syncRoom()');
+await ca.pull();
 await ca.run('launchRoom()');
-await cb.run('syncRoom()');
+await cb.pull();
 modifyRoom(ca.run('net.code'), r => {
   r.balance = 25;
   r.collectedCoins = [0, 1, 2];
@@ -624,12 +684,12 @@ modifyRoom(ca.run('net.code'), r => {
   r.status = 'lost';
   r.players.forEach(p => (p.alive = false));
 });
-await ca.run('syncRoom()');
-await cb.run('syncRoom()');
+await ca.pull();
+await cb.pull();
 assert.equal(ca.run('state'), 'lost');
 assert.equal(cb.run('state'), 'lost');
 await ca.run('reviveAll()');
-await cb.run('syncRoom()');
+await cb.pull();
 assert.equal(ca.run('state'), 'playing');
 assert.equal(cb.run('state'), 'playing');
 assert.equal(cb.run('coinBalance'), 0);
@@ -793,7 +853,7 @@ await la.run("connectRoom('create')");
 lb.sandbox.document.getElementById('roomCode').value = la.run('net.code');
 await lb.run("connectRoom('join')");
 await la.run('launchRoom()');
-await lb.run('syncRoom()');
+await lb.pull();
 assert.equal(la.run('activeLevel'), 'backrooms');
 const phaseOrder = PHASE_ORDER;
 const campaignNow = Date.now;
@@ -803,19 +863,23 @@ try {
   for (let i = 0; i < phaseOrder.length; i++) {
     assert.equal(la.run('activeLevel'), phaseOrder[i]);
     assert.equal(lb.run('activeLevel'), phaseOrder[i]);
-    await call('level', la.run('roomPayload()'), 409);
+    await call(
+      'level',
+      la.run('({code:net.code,id:net.id,token:net.token,round:net.room.round})'),
+      409,
+    );
     modifyRoom(la.run('net.code'), r => {
       r.status = 'won';
       r.fuses = r.world.fuses.map(() => true);
       r.started = campaignClock - 14000;
       r.finished = campaignClock;
     });
-    await la.run('syncRoom()');
-    await lb.run('syncRoom()');
+    await la.pull();
+    await lb.pull();
     assert.equal(la.run('state'), 'won');
     campaignClock += 3001;
-    await la.run('syncRoom()');
-    await lb.run('syncRoom()');
+    await la.pull();
+    await lb.pull();
     if (i + 1 < phaseOrder.length) {
       assert.equal(la.run('activeLevel'), phaseOrder[i + 1]);
       assert.equal(lb.run('activeLevel'), phaseOrder[i + 1]);
@@ -827,7 +891,7 @@ try {
     } else {
       assert.equal(la.run('state'), 'won');
       const score = await rankCall('submit', {
-        ...la.run('roomPayload()'),
+        ...la.run('({code:net.code,id:net.id,token:net.token,round:net.room.round})'),
         name: 'Fake',
         milliseconds: 1,
         level: 'run',
@@ -838,7 +902,7 @@ try {
     campaignClock += 14000;
   }
   await la.run('launchRoom()');
-  await lb.run('syncRoom()');
+  await lb.pull();
   assert.equal(la.run('activeLevel'), 'backrooms');
   assert.equal(lb.run('activeLevel'), 'backrooms');
 } finally {
@@ -993,11 +1057,11 @@ await hca.run("connectRoom('create')");
 hcb.sandbox.document.getElementById('roomCode').value = hca.run('net.code');
 await hcb.run("connectRoom('join')");
 await hca.run("selectMode('hardcore','lobby')");
-await hcb.run('syncRoom()');
+await hcb.pull();
 assert.equal(hcb.run('activeMode'), 'hardcore');
 assert.equal(hcb.run('coins.length'), 0);
 await hca.run('launchRoom()');
-await hcb.run('syncRoom()');
+await hcb.pull();
 assert.ok(hcb.run("smile.type==='smile'"));
 hcb.run('elapsed=23;render(100)');
 console.log(
@@ -1131,26 +1195,49 @@ const staleLife = await call(
 assert.equal(staleLife.positionAccepted, false);
 assert.equal(staleLife.movementReason, 'respawn');
 assert.equal(staleLife.room.players[0].x, 1.5);
-const jitterPage = client();
-jitterPage.run("document.getElementById('nickname').value='Cliente'");
-await jitterPage.run("connectRoom('create')");
-await jitterPage.run('launchRoom()');
-jitterPage.run(
-  "player.x+=.2;recordMovement();const snapshot=JSON.parse(JSON.stringify(net.room));applySnapshot({room:{...snapshot,revision:snapshot.revision+1},positionAccepted:false,movementReason:'speed',ackMovement:0})",
+// Cliente WebSocket: predição local, correção só acima de 0,5 célula, input a 30 Hz, interpolação e reconexão.
+const live = client();
+live.run("document.getElementById('nickname').value='Cliente'");
+await live.run("connectRoom('create')");
+await live.run('launchRoom()');
+assert.equal(live.run('state'), 'playing');
+const snapshotMessage = (x, y, extra = {}) =>
+  JSON.stringify({
+    t: 'snapshot',
+    tick: 1,
+    players: [{ id: live.run('net.id'), x, y, a: 0, anim: 'idle', alive: true }],
+    enemy: { x: 19.5, y: 19.5 },
+    smile: null,
+    fuses: live.run('net.room.fuses'),
+    coins: { balance: 0, collected: [] },
+    ...extra,
+  });
+live.run('player.x=1.7;player.y=1.5;recordPrediction()');
+// O servidor ainda vê o jogador onde ele estava 100 ms atrás: não é divergência.
+live.run(`handleServerMessage(${JSON.stringify(snapshotMessage(1.5, 1.5))})`);
+assert.equal(live.run('player.x'), 1.7);
+// Servidor muito longe de qualquer posição recente: corrige.
+const far = live.run('net.room.players[0]');
+live.run(`handleServerMessage(${JSON.stringify(snapshotMessage(far.x + 3, far.y))})`);
+assert.equal(live.run('player.x'), far.x + 3);
+live.run('recordPrediction()');
+// Input a cada tick, em seq crescente; parado ou pausado manda zeros.
+const wsLive = live.sockets.at(-1);
+live.run(
+  "keys={KeyW:true,ShiftLeft:true};stamina=100;update(1/60);sendInput();state='paused';sendInput()",
 );
-assert.equal(jitterPage.run('player.x'), 1.7);
-assert.equal(jitterPage.run('movementWaiting'), true);
-assert.equal(jitterPage.run('movementTrail.length'), 1);
-assert.ok(jitterPage.run('JSON.stringify(roomPayload()).length<4096'));
-console.log(
-  'PASS: legal corner breadcrumbs accepted, through-wall jumps rejected, duplicate acknowledgement safe, latency budget retries, stale-life packets rejected, client no longer snaps back on jitter.',
-);
-// Twenty seconds at 144 Hz builds a multi-packet backlog despite eased reversals.
+const inputs = wsLive.sent.filter(m => m.t === 'input').slice(-2);
+assert.deepEqual([inputs[0].dx, inputs[0].dy, inputs[0].run], [0, 1, true]);
+assert.deepEqual([inputs[1].dx, inputs[1].dy, inputs[1].run], [0, 0, false]);
+assert.ok(inputs[1].seq > inputs[0].seq);
+assert.ok(!JSON.stringify(wsLive.sent).includes('trail'));
+live.run("state='playing';keys={}");
+// A predição local não depende da rede: 20 s a 144 Hz batem com o movimento offline.
 const smooth = client();
 smooth.run("document.getElementById('nickname').value='Fluido'");
 await smooth.run("connectRoom('create')");
 await smooth.run('launchRoom()');
-smooth.run('player.a=grid[1][2]===0?0:Math.PI/2;movementWaiting=true');
+smooth.run('player.a=grid[1][2]===0?0:Math.PI/2');
 const offlineMotion = client();
 offlineMotion.run(
   `grid=${smooth.run('JSON.stringify(grid)')};player=${smooth.run('JSON.stringify(player)')};resetMotion()`,
@@ -1164,45 +1251,33 @@ for (let i = 0; i < 2880; i++) {
   const expected = offlineMotion.run('({x:player.x,y:player.y})');
   assert.ok(
     Math.hypot(after.x - expected.x, after.y - expected.y) < 1e-8,
-    'network waiting changed smooth local movement',
+    'online play changed smooth local movement',
   );
   assert.ok(
     Math.hypot(after.x - before.x, after.y - before.y) <= 1.85 / 144 + 1e-8,
     'walking exceeded speed limit',
   );
 }
-assert.ok(smooth.run('movementTrail.length>96'));
-const predicted = smooth.run('({x:player.x,y:player.y})');
-const packet = smooth.run('roomPayload()');
-assert.ok(packet.trail.length <= 96);
-assert.ok(JSON.stringify(packet).length < 4096);
-assert.equal(packet.x, packet.trail.at(-1)[1]);
-assert.equal(packet.y, packet.trail.at(-1)[2]);
-// Walking while this packet is in flight must not rewrite its acknowledgement.
-smooth.run('keys={KeyW:true};update(1/144)');
-const frozen = smooth.run(`movementTrail.find(p=>p[0]===${packet.trail.at(-1)[0]})`);
-assert.equal(frozen[1], packet.x);
-assert.equal(frozen[2], packet.y);
-let batches = 0;
-while (smooth.run('movementTrail.length')) {
-  modifyRoom(smooth.run('net.code'), r => {
-    r.players[0].moveCredit = 6;
-    r.players[0].moveClock = Date.now();
-  });
-  const before = smooth.run('({x:player.x,y:player.y})');
-  await smooth.run('syncRoom()');
-  assert.equal(smooth.run('movementWaiting'), false);
-  assert.equal(smooth.run('player.x'), before.x);
-  assert.equal(smooth.run('player.y'), before.y);
-  assert.ok(++batches < 50);
-}
-assert.ok(batches > 1);
-const settled = smooth.run('net.room.players.find(p=>p.id===net.id)');
-assert.ok(
-  Math.hypot(settled.x - smooth.run('player.x'), settled.y - smooth.run('player.y')) < 0.002,
+// Queda de conexão: continua na sala, avisa na tela e volta com o mesmo token.
+const token = live.run('net.token');
+wsLive.readyState = 3;
+wsLive.onclose();
+assert.equal(live.run('net.connected'), false);
+assert.notEqual(live.run('net'), null);
+assert.equal(live.run('$("connection").textContent'), 'RECONECTANDO…');
+live.run('openSocket()');
+await live.pull();
+assert.equal(live.sockets.length, 2);
+assert.equal(live.sockets.at(-1).sent[0].token, token);
+assert.equal(live.run('net.connected'), true);
+assert.equal(live.run('reconnectAttempt'), 0);
+// Erro de autenticação do servidor tira o jogador da sala; erro comum só avisa.
+live.run(
+  `handleServerMessage(${JSON.stringify(JSON.stringify({ t: 'error', code: 'rate', message: 'Devagar.' }))})`,
 );
+assert.notEqual(live.run('net'), null);
 console.log(
-  'PASS: uninterrupted 144-Hz movement through twenty seconds of delayed multiplayer responses, bounded batches, immutable in-flight points, complete backlog drain without teleporting.',
+  'PASS: WebSocket client predicts locally, corrects only past 0.5 cell, sends 30 Hz input without trails, keeps the room across a dropped socket and reconnects with the same token.',
 );
 
 // Missions track actual game events and survive reopening the tab.
@@ -1248,8 +1323,8 @@ modifyRoom(missionTeam.run('net.code'), r => {
   r.fuses = [true, true, true];
   r.balance = 50;
 });
-await missionTeam.run('syncRoom()');
-await missionTeam.run('syncRoom()');
+await missionTeam.pull();
+await missionTeam.pull();
 assert.equal(missionTeam.run("missionValue('wins')"), 1);
 assert.equal(missionTeam.run("missionValue('coopWins')"), 1);
 assert.equal(missionTeam.run("missionValue('coins')"), 50);

@@ -30,6 +30,7 @@ export const game = {
   light: true,
   muted: false,
   keys: {},
+  input: { dx: 0, dy: 0, run: false },
   pathTimer: 0,
   enemyPath: [],
   audio: undefined,

@@ -1,4 +1,4 @@
-// Multiplayer: salas, sincronização por polling, lobby e trilha de movimento.
+// Multiplayer: salas, WebSocket com predição/interpolação e lobby.
 import { PHASE_ORDER } from '../world.js';
 import { initAudio, syncGameMusic, syncMenuMusic, tone } from './audio.js';
 import { builder, openWorkshop, returnToBuilder } from './builder.js';
@@ -12,19 +12,21 @@ import { missionSet, recordMissionWin } from './missions.js';
 import { selectedMode, updateLevelButtons, updateModeButtons } from './modes.js';
 import { drawExplorer } from './render.js';
 import { updateRescueUI } from './revive.js';
+import { INPUT_INTERVAL_MS, PredictionHistory, SnapshotBuffer, reconnectDelay } from './netsync.js';
 import { game } from './state.js';
 
-let movementTrail = [],
-  movementOrdinal = 0,
-  movementSentOrdinal = 0,
-  movementAnchor = { x: 1.5, y: 1.5 },
-  movementWaiting = false;
+const PROTOCOL_VERSION = 1;
+
+const history = new PredictionHistory(),
+  remoteBuffer = new SnapshotBuffer();
 let net = null,
   remotePlayers = [],
-  remoteTargets = [],
-  netBusy = false,
   netSeq = 0,
-  pollTimer = null,
+  socket = null,
+  inputTimer = null,
+  reconnectTimer = null,
+  reconnectAttempt = 0,
+  clockSkew = 0,
   sceneRound = -1;
 function showPanel(which) {
   $('adminPanel').hidden = !isAdmin();
@@ -125,83 +127,132 @@ async function connectRoom(action) {
     netSeq = 0;
     sceneRound = -1;
     remotePlayers = [];
+    remoteBuffer.clear();
     applySnapshot(data, true);
     if (data.room.status === 'lobby') showLobby();
-    schedulePoll();
+    openSocket();
   } catch (e) {
     $('homeError').textContent = e.message;
   } finally {
     busyHome(false);
   }
 }
-function roomPayload() {
-  recordMovement();
-  // Keep local movement independent of network latency. Send bounded prefixes,
-  // retaining every unacknowledged turn and an immutable in-flight endpoint.
-  const trail = [];
-  let x = movementAnchor.x,
-    y = movementAnchor.y,
-    distance = 0;
-  for (const point of movementTrail) {
-    const d = Math.hypot(point[1] - x, point[2] - y);
-    if (trail.length >= 96 || (trail.length && distance + d > 5)) break;
-    trail.push([...point]);
-    distance += d;
-    x = point[1];
-    y = point[2];
-  }
-  if (trail.length) movementSentOrdinal = Math.max(movementSentOrdinal, trail.at(-1)[0]);
-  return {
-    code: net.code,
-    id: net.id,
-    token: net.token,
-    round: net.room.round,
+function sendMessage(msg) {
+  if (socket?.readyState !== 1) return false;
+  socket.send(JSON.stringify(msg));
+  return true;
+}
+function sendAction(kind, extra = {}) {
+  if (!sendMessage({ t: 'action', kind, ...extra }))
+    throw Error('Sem conexão com a sala. Reconectando…');
+}
+function sendInput() {
+  if (!net || socket?.readyState !== 1 || !net.joined) return;
+  const moving = game.state === 'playing' && !net.dead,
+    input = moving && game.input ? game.input : { dx: 0, dy: 0, run: false };
+  sendMessage({
+    t: 'input',
     seq: ++netSeq,
-    x,
-    y,
+    dx: input.dx,
+    dy: input.dy,
     a: game.player.a,
-    respawns: net.respawns || 0,
-    trail,
+    run: input.run,
+    light: game.light,
+  });
+}
+function openSocket() {
+  clearTimeout(reconnectTimer);
+  if (!net) return;
+  const session = net,
+    scheme = location.protocol === 'http:' ? 'ws:' : 'wss:',
+    ws = new WebSocket(scheme + '//' + location.host + '/api/rooms/' + net.code + '/ws');
+  socket = ws;
+  session.joined = false;
+  ws.onopen = () => {
+    if (net === session && socket === ws)
+      sendMessage({ t: 'hello', v: PROTOCOL_VERSION, token: session.token });
   };
+  ws.onmessage = event => {
+    if (net === session && socket === ws) handleServerMessage(event.data);
+  };
+  ws.onclose = () => {
+    if (net === session && socket === ws) lostConnection();
+  };
+  ws.onerror = () => {};
+  clearInterval(inputTimer);
+  inputTimer = setInterval(sendInput, INPUT_INTERVAL_MS);
 }
-function schedulePoll() {
-  clearTimeout(pollTimer);
-  if (net)
-    pollTimer = setTimeout(
-      syncRoom,
-      net.room.status === 'playing' ? (movementTrail.length && !movementWaiting ? 30 : 180) : 700,
-    );
+function lostConnection() {
+  socket = null;
+  net.connected = false;
+  net.joined = false;
+  game.keys = {};
+  const wait = reconnectDelay(reconnectAttempt++);
+  $('connection').textContent = 'RECONECTANDO…';
+  $('lobbyStatus').textContent = 'Conexão interrompida. Tentando reconectar…';
+  say('Conexão perdida. Reconectando em ' + wait / 1000 + 's…');
+  if (!$('lobbyPanel').hidden) renderLobby();
+  reconnectTimer = setTimeout(openSocket, wait);
 }
-async function syncRoom() {
-  if (!net || netBusy) return;
-  const session = net;
-  netBusy = true;
+function closeSocket() {
+  clearTimeout(reconnectTimer);
+  clearInterval(inputTimer);
+  const old = socket;
+  socket = null;
+  reconnectAttempt = 0;
   try {
-    const data = await requestRoom('sync', roomPayload());
-    if (net !== session) return;
-    net.connected = true;
-    applySnapshot(data);
-  } catch (e) {
-    if (net !== session) return;
-    net.connected = false;
-    game.keys = {};
-    $('connection').textContent = 'RECONECTANDO…';
-    $('lobbyStatus').textContent = e.message;
-    if (e.status === 401 || e.status === 404) {
-      await leaveRoom(false);
-      $('homeError').textContent = e.message;
-    }
-  } finally {
-    netBusy = false;
-    schedulePoll();
+    old?.close(1000);
+  } catch {}
+}
+function handleServerMessage(raw) {
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return;
   }
+  if (msg.t === 'welcome') {
+    reconnectAttempt = 0;
+    net.joined = true;
+    clockSkew = msg.room.now - Date.now();
+    net.room = { ...msg.room, revision: net.room.revision || 0 };
+    applySnapshot({ room: net.room });
+    pushRemote(msg.room.players);
+  } else if (msg.t === 'snapshot') {
+    const room = { ...net.room, now: Date.now() + clockSkew };
+    const byId = new Map(msg.players.map(p => [p.id, p]));
+    room.players = room.players.map(p => {
+      const s = byId.get(p.id);
+      return s ? { ...p, x: s.x, y: s.y, a: s.a, alive: s.alive } : p;
+    });
+    room.enemy = msg.enemy;
+    room.smile = msg.smile;
+    room.fuses = msg.fuses;
+    room.balance = msg.coins.balance;
+    room.collectedCoins = msg.coins.collected;
+    applySnapshot({ room });
+    pushRemote(msg.players);
+  } else if (msg.t === 'event' && msg.kind === 'chat') {
+    net.room.messages = [...(net.room.messages || []), msg.message].slice(-50);
+  } else if (msg.t === 'error') {
+    $('lobbyStatus').textContent = msg.message;
+    if (msg.code === 'auth' || msg.code === 'room' || msg.code === 'version') {
+      const message = msg.message;
+      void leaveRoom(false).then(() => ($('homeError').textContent = message));
+    } else say(msg.message);
+  }
+}
+function pushRemote(players) {
+  remoteBuffer.push(
+    performance.now(),
+    players.filter(p => p.id !== net.id),
+  );
 }
 function applySnapshot(data, initial = false) {
   const room = data.room;
   if (!net) return;
   if (!initial && room.revision < net.room.revision) return;
-  const previousCount = game.fuses.filter(f => f.taken).length,
-    oldStatus = net.room.status;
+  const previousCount = game.fuses.filter(f => f.taken).length;
   net.room = room;
   net.connected = true;
   renderChat();
@@ -211,14 +262,13 @@ function applySnapshot(data, initial = false) {
   if (sceneRound !== room.round || initial) {
     reset(room.seed, room.level || 'backrooms', room.mode || 'normal');
     sceneRound = room.round;
-    netSeq = 0;
     net.dead = false;
     const mine = room.players.find(p => p.id === net.id);
     if (mine) {
       game.player.x = mine.x;
       game.player.y = mine.y;
       game.player.a = mine.a;
-      resetMovementTrail();
+      history.clear();
     }
     if (room.status === 'playing') {
       game.state = 'playing';
@@ -232,21 +282,12 @@ function applySnapshot(data, initial = false) {
       game.state = 'lobby';
     }
   }
-  if (Number.isSafeInteger(data.ackMovement)) {
-    const acknowledged = movementTrail.filter(p => p[0] <= data.ackMovement).at(-1);
-    if (acknowledged) movementAnchor = { x: acknowledged[1], y: acknowledged[2] };
-    movementTrail = movementTrail.filter(p => p[0] > data.ackMovement);
+  const me = room.players.find(p => p.id === net.id);
+  if (me && game.state === 'playing' && me.alive && !net.dead && history.diverged(me.x, me.y)) {
+    game.player.x = me.x;
+    game.player.y = me.y;
+    history.clear();
   }
-  movementWaiting = data.positionAccepted === false && data.movementReason === 'speed';
-  if (data.positionAccepted === false && !movementWaiting && data.movementReason !== 'respawn') {
-    const mine = room.players.find(p => p.id === net.id);
-    if (mine) {
-      game.player.x = mine.x;
-      game.player.y = mine.y;
-      resetMovementTrail(data.ackMovement || 0);
-    }
-  }
-  if (movementWaiting) $('connection').textContent = 'SINCRONIZANDO MOVIMENTO…';
   game.coins.forEach(c => (c.taken = (room.collectedCoins || []).includes(c.id)));
   game.coinBalance = room.balance || 0;
   if (room.status !== 'lobby') {
@@ -266,13 +307,12 @@ function applySnapshot(data, initial = false) {
         : 'Sua equipe encontrou um fusível!',
     );
   }
-  remoteTargets = room.players
+  remotePlayers = room.players
     .filter(p => p.id !== net.id)
-    .map(p => ({ ...p, received: performance.now() }));
-  remotePlayers = remoteTargets.map(p => {
-    const old = remotePlayers.find(v => v.id === p.id);
-    return { ...p, x: old?.x ?? p.x, y: old?.y ?? p.y };
-  });
+    .map(p => {
+      const old = remotePlayers.find(v => v.id === p.id);
+      return { ...p, x: old?.x ?? p.x, y: old?.y ?? p.y, a: old?.a ?? p.a };
+    });
   $('teamStatus').replaceChildren(
     ...room.players.map(p => {
       const div = document.createElement('div');
@@ -295,7 +335,7 @@ function applySnapshot(data, initial = false) {
     game.player.x = mine.x;
     game.player.y = mine.y;
     game.player.a = mine.a;
-    resetMovementTrail();
+    history.clear();
     game.stamina = 100;
     game.state = 'playing';
     document.body.classList.add('playing');
@@ -343,18 +383,10 @@ function applySnapshot(data, initial = false) {
   updateRescueUI();
   if (!$('lobbyPanel').hidden) renderLobby();
 }
-function interpolateRemote() {
+function updateRemotePlayers(now) {
   for (const p of remotePlayers) {
-    const target = remoteTargets.find(t => t.id === p.id);
-    if (!target) continue;
-    let d = Math.hypot(target.x - p.x, target.y - p.y);
-    if (d > 2) {
-      p.x = target.x;
-      p.y = target.y;
-    } else {
-      p.x += (target.x - p.x) * 0.22;
-      p.y += (target.y - p.y) * 0.22;
-    }
+    const at = remoteBuffer.sample(p.id, now);
+    if (at) Object.assign(p, at);
   }
 }
 function showLobby() {
@@ -442,11 +474,7 @@ async function launchRoom() {
   }
   $('launch').disabled = true;
   try {
-    const session = net;
-    const data = await requestRoom('start', roomPayload());
-    if (net !== session) return;
-    applySnapshot(data);
-    resumeOnline();
+    sendAction('start');
   } catch (e) {
     $('lobbyStatus').textContent = e.message;
   } finally {
@@ -455,12 +483,13 @@ async function launchRoom() {
 }
 async function leaveRoom(send = true) {
   closeChat(false);
-  const old = net;
+  if (send && net) sendMessage({ t: 'action', kind: 'leave' });
   net = null;
   renderChat();
-  clearTimeout(pollTimer);
+  closeSocket();
   remotePlayers = [];
-  remoteTargets = [];
+  remoteBuffer.clear();
+  history.clear();
   game.keys = {};
   game.state = 'ready';
   document.body.classList.remove('playing');
@@ -473,39 +502,10 @@ async function leaveRoom(send = true) {
   reset(93451);
   syncMenuMusic();
   syncGameMusic();
-  if (send && old)
-    requestRoom('leave', { code: old.code, id: old.id, token: old.token }).catch(() => {});
 }
-function resetMovementTrail(ordinal = 0) {
-  movementTrail = [];
-  movementOrdinal = ordinal;
-  movementSentOrdinal = ordinal;
-  movementAnchor = { x: game.player.x, y: game.player.y };
-  movementWaiting = false;
-}
-function recordMovement() {
+function recordPrediction() {
   if (!net || game.state !== 'playing' || net.dead) return;
-  const last = movementTrail.at(-1),
-    x = Math.round(game.player.x * 1000) / 1000,
-    y = Math.round(game.player.y * 1000) / 1000;
-  const px = last ? last[1] : movementAnchor.x,
-    py = last ? last[2] : movementAnchor.y;
-  if (Math.hypot(x - px, y - py) <= 0.001) return;
-  const previous = movementTrail.at(-2),
-    ax = previous ? previous[1] : movementAnchor.x,
-    ay = previous ? previous[2] : movementAnchor.y;
-  // Only collapse exact straight segments; corners and already-sent samples
-  // must survive retries. Short segments also bound each transmitted step.
-  if (
-    last &&
-    last[0] > movementSentOrdinal &&
-    Math.abs((px - ax) * (y - ay) - (py - ay) * (x - ax)) < 1e-9 &&
-    (px - ax) * (x - px) + (py - ay) * (y - py) >= 0 &&
-    Math.hypot(x - ax, y - ay) <= 0.2
-  ) {
-    last[1] = x;
-    last[2] = y;
-  } else movementTrail.push([++movementOrdinal, x, y]);
+  history.record(performance.now(), game.player.x, game.player.y);
 }
 
 function setupNet() {
@@ -544,18 +544,17 @@ function setupNet() {
 
 export {
   applySnapshot,
-  interpolateRemote,
   isAdmin,
   leaveRoom,
   nameInput,
   net,
-  recordMovement,
+  recordPrediction,
   remotePlayers,
   requestRoom,
-  resetMovementTrail,
   resumeOnline,
-  roomPayload,
+  sendAction,
   setupNet,
   showLobby,
   showPanel,
+  updateRemotePlayers,
 };
