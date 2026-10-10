@@ -62,6 +62,15 @@ label {
   color: var(--muted);
   font-size: 13px;
 }
+/* A página bloqueia seleção e gestos por causa do jogo; campos e botões precisam deles de volta
+   (no Safari do iPhone, sem isso o campo de nome não recebe texto). */
+input,
+select,
+button {
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: manipulation;
+}
 input,
 button {
   font: inherit;
