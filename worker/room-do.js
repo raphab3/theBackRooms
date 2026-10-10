@@ -1,4 +1,5 @@
 import { ApiError, json } from './http.js';
+import { saveExpedition } from './inventory.js';
 import { TTL, beginPhase, safeRoom, tickRoom } from './rooms.js';
 import { ROOM_ACTIONS, stepRoom } from './room-actions.js';
 import { recordPlayers, recordRtt, recordSocketError, track } from './telemetry.js';
@@ -113,7 +114,31 @@ class RoomDO {
     return { room: view };
   }
 
+  // Fim da expedição: estoque de cada um no D1 (uma vez só) e aviso ao Posto Zero de onde vieram.
+  saveResult() {
+    const room = this.room;
+    if (!room?.extracted || room.expeditionSaved || this.saving || !this.env?.DB) return;
+    this.saving = saveExpedition(this.env.DB, room, Date.now())
+      .then(() => {
+        room.expeditionSaved = true;
+        this.dirty = true;
+        if (room.lobbyKey && this.env.LOBBIES) {
+          const loot = {};
+          for (const items of Object.values(room.extracted))
+            for (const [item, qty] of Object.entries(items)) loot[item] = (loot[item] || 0) + qty;
+          return this.env.LOBBIES.get(this.env.LOBBIES.idFromName(room.lobbyKey)).fetch(
+            'https://lobby.internal/result',
+            { method: 'POST', body: JSON.stringify({ won: room.status === 'won', loot }) },
+          );
+        }
+      })
+      .catch(error => console.error('Falha ao guardar a expedição', error))
+      .finally(() => (this.saving = null));
+    this.ctx.waitUntil?.(this.saving);
+  }
+
   persist() {
+    this.saveResult();
     this.dirty = false;
     this.lastSave = Date.now();
     this.ctx.waitUntil?.(this.ctx.storage.put('room', this.room));

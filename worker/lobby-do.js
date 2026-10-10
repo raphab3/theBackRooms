@@ -14,6 +14,7 @@ import {
 } from '@backrooms/shared/lobby.js';
 import { PHASE_ORDER } from '@backrooms/shared/world.js';
 import { createRoom } from './expeditions.js';
+import { hashKey } from './inventory.js';
 import { ApiError, json } from './http.js';
 import { colors, nameOf, newPlayer } from './players.js';
 
@@ -55,6 +56,17 @@ class LobbyDO {
       }
       if (url.pathname === '/info')
         return json({ exists: !!this.meta, players: this.players.size });
+      // Resultado de uma expedição que saiu deste lobby: vira histórico do Posto Zero do time.
+      if (url.pathname === '/result') {
+        const { won, loot } = await request.json(),
+          base = (this.meta.base ??= { expeditions: 0, wins: 0, loot: {} });
+        base.expeditions++;
+        if (won) base.wins++;
+        for (const [item, qty] of Object.entries(loot || {}))
+          if (Number.isSafeInteger(qty)) base.loot[item] = (base.loot[item] || 0) + qty;
+        await this.ctx.storage.put('meta', this.meta);
+        return json({ ok: true });
+      }
       throw new ApiError('Ação não encontrada.', 404);
     } catch (error) {
       if (!(error instanceof ApiError)) console.error('Lobby DO failure', error);
@@ -80,19 +92,27 @@ class LobbyDO {
     server.serializeAttachment(player);
     this.addPlayer(player);
     server.send(
-      JSON.stringify({ t: 'welcome', id: player.id, key: this.meta.key, code: this.meta.code }),
+      JSON.stringify({
+        t: 'welcome',
+        id: player.id,
+        key: this.meta.key,
+        code: this.meta.code,
+        owner: this.meta.owner || null,
+        base: this.meta.base || null,
+      }),
     );
     this.startTick();
     this.report();
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  addPlayer({ id, name, color, skin }) {
+  addPlayer({ id, name, color, skin, keyHash }) {
     this.players.set(id, {
       id,
       name,
       color,
       skin,
+      keyHash,
       x: LOBBY_SPAWN.x + (Math.random() - 0.5) * 4,
       z: LOBBY_SPAWN.z + (Math.random() - 0.5) * 2,
       yaw: Math.PI,
@@ -162,7 +182,7 @@ class LobbyDO {
       return this.send(p.id, { t: 'error', error: 'Pedido inválido.' });
     }
     try {
-      this.handle(p, msg, Date.now());
+      await this.handle(p, msg, Date.now());
     } catch (error) {
       this.send(p.id, { t: 'error', error: error instanceof ApiError ? error.message : 'Erro.' });
     }
@@ -212,10 +232,18 @@ class LobbyDO {
       }
       return;
     }
+    if (msg.t === 'auth') return this.auth(p, msg.key);
     if (msg.t === 'invite') return this.invite(p, msg.to, now);
     if (msg.t === 'accept') return this.accept(p, now);
     if (msg.t === 'leaveParty') return this.leaveParty(p.id);
     throw new ApiError('Mensagem desconhecida.');
+  }
+
+  // A chave do aparelho chega pelo socket (nunca na URL); só o hash fica guardado.
+  async auth(p, key) {
+    p.keyHash = await hashKey(key);
+    const ws = this.socketOf(p.id);
+    ws?.serializeAttachment({ ...ws.deserializeAttachment(), keyHash: p.keyHash });
   }
 
   partyOf(id) {
@@ -310,7 +338,8 @@ class LobbyDO {
     if (!group.length) return;
     const now = Date.now(),
       players = [];
-    for (const p of group) players.push({ ...newPlayer(p.name, now, players), skin: p.skin });
+    for (const p of group)
+      players.push({ ...newPlayer(p.name, now, players), skin: p.skin, keyHash: p.keyHash });
     try {
       const room = await createRoom(this.env, players, {
         level: level || PHASE_ORDER[0],
@@ -318,6 +347,7 @@ class LobbyDO {
         // Expedição de um nível só: no fim o grupo volta ao lobby, sem avançar de fase sozinho.
         campaign: false,
         start: true,
+        lobbyKey: this.meta.key,
       });
       group.forEach((p, i) => {
         this.send(p.id, {

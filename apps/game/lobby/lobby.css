@@ -142,6 +142,14 @@ button.primary {
   border-radius: 6px;
   font-size: 14px;
 }
+#stock {
+  top: 52px;
+  left: 12px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-size: 14px;
+}
 #help {
   top: 12px;
   right: 12px;
@@ -370,7 +378,7 @@ button.primary {
   }
   /* Deitado sobra pouca altura: o chat sobe para o topo, longe do joystick. */
   #chat {
-    top: 52px;
+    top: 92px;
     bottom: auto;
     width: min(300px, calc(100% - 220px));
   }

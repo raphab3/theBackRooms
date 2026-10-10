@@ -29,7 +29,7 @@ function roomRequest(env, code, path, payload) {
 
 // Cria uma sala com `players` já dentro (o primeiro é o anfitrião). Com `start`, a partida já
 // começa na primeira fase, como quando o grupo atravessa o portal do lobby.
-async function createRoom(env, players, { level, mode, campaign, start = false }) {
+async function createRoom(env, players, { level, mode, campaign, start = false, lobbyKey = null }) {
   const now = Date.now(),
     seed = crypto.getRandomValues(new Uint32Array(1))[0],
     world = createWorld(seed, level);
@@ -54,6 +54,7 @@ async function createRoom(env, players, { level, mode, campaign, start = false }
         collectedCoins: [],
         fuses: world.fuses.map(() => false),
         enemy: { ...world.enemy },
+        lobbyKey,
       };
     if (start) beginPhase(room, now, level);
     const response = await roomRequest(env, code, '/init', { room });

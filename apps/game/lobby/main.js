@@ -5,6 +5,7 @@ import { LOBBY_BOUNDS, RUN_SPEED, SKINS } from '@backrooms/shared/lobby.js';
 import { Avatar, preloadSkins } from './avatar.js';
 import { RemoteBuffer, enterLobby, openLobbySocket } from './net.js';
 import { createHum } from './hum.js';
+import { deviceKey, readHome, saveHome } from './identity.js';
 import { enterLandscape, setupLandscape } from './landscape.js';
 import { bindQualitySelect, createPipeline } from './quality.js';
 import { createStats } from './stats.js';
@@ -130,6 +131,38 @@ const label = lobby =>
   lobby.code
     ? `Lobby privado · código <b>${lobby.code}</b>`
     : `Lobby público · grupo ${lobby.key.split('-')[1]}`;
+const escapeHtml = text => String(text).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const ICONS = { scrap: '🔩', almond: '💧', core_fire: '🔥' },
+  ITEM_NAMES = { scrap: 'Sucata', almond: 'Amêndoa', core_fire: 'Núcleo de Fogo' };
+// Estoque pessoal guardado entre partidas (o que as vitórias trouxeram).
+async function refreshStock(name) {
+  try {
+    const response = await fetch('/api/inventory/get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: deviceKey(), name }),
+      }),
+      { items = {} } = await response.json();
+    $('stock').textContent =
+      'Estoque: ' +
+      (Object.keys(ITEMS_ORDER)
+        .map(item => `${ICONS[item]} ${items[item] || 0}`)
+        .join('  ') || '');
+    $('stock').title = Object.keys(ITEMS_ORDER)
+      .map(item => `${ITEM_NAMES[item]}: ${items[item] || 0}`)
+      .join('\n');
+  } catch {
+    $('stock').textContent = 'Estoque indisponível';
+  }
+}
+const ITEMS_ORDER = { scrap: 1, almond: 1, core_fire: 1 };
+// Posto Zero do time: o lobby privado guarda dono e histórico de expedições.
+function baseLabel(m) {
+  if (!m.code) return label({ key: m.key });
+  const base = m.base || { expeditions: 0, wins: 0 },
+    owner = m.owner ? `Posto Zero de ${escapeHtml(m.owner)}` : 'Lobby privado';
+  return `${owner} · código <b>${m.code}</b> · ${base.expeditions} expedições · ${base.wins} vitórias`;
+}
 async function connectLobby(key, text, name) {
   await preloadSkins([skin]);
   lobbyLabel = text;
@@ -149,6 +182,15 @@ function returnToLobby() {
   } catch {}
 }
 $('public').onclick = () => join('public');
+const home = readHome();
+if (home) {
+  $('home').hidden = false;
+  $('home').textContent = `Voltar ao meu Posto Zero (${home.code})`;
+  $('home').onclick = () => {
+    $('code').value = home.code;
+    join('join');
+  };
+}
 $('private').onclick = () => join('private');
 $('join').onclick = () => join('join');
 $('code').addEventListener('keydown', e => e.key === 'Enter' && join('join'));
@@ -169,6 +211,10 @@ function onClose(event) {
 function onMessage(m) {
   if (m.t === 'welcome') {
     me.id = m.id;
+    socket.send({ t: 'auth', key: deviceKey() });
+    lobbyLabel = baseLabel(m);
+    if (m.code) saveHome(m.code, m.owner);
+    void refreshStock($('nickname').value.trim() || 'Explorador');
     $('menu').hidden = true;
     $('hud').hidden = false;
   } else if (m.t === 'snap') {

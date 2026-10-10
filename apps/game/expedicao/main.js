@@ -295,7 +295,7 @@ function finish(won) {
       .join(', ');
   $('endLoot').textContent = won
     ? loot
-      ? `Você levou: ${loot}.`
+      ? `Você levou: ${loot}. Guardado no seu estoque.`
       : 'Você não trouxe nada desta vez.'
     : 'A mochila ficou para trás.';
   $('end').hidden = false;

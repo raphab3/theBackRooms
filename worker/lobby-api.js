@@ -30,7 +30,13 @@ async function lobbyApi(env, action, body) {
     for (let i = 0; i < 5; i++) {
       const code = randomCode(),
         key = 'priv-' + code,
-        { status } = await lobbyCall(env, key, '/init', { key, code, public: false });
+        { status } = await lobbyCall(env, key, '/init', {
+          key,
+          code,
+          public: false,
+          owner: nameOf(body), // o Posto Zero do time leva o nome de quem o criou
+          createdAt: Date.now(),
+        });
       if (status === 200) return { key, code };
     }
     throw new ApiError('Não foi possível criar o lobby. Tente novamente.', 503);

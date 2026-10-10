@@ -122,4 +122,49 @@ describe('LobbyDO', () => {
     expect(resumed.data.room.status).toBe('playing');
     expect(resumed.data.room.players.map(p => p.name).sort()).toEqual(['Ana', 'Rafa']);
   });
+
+  it('vitória credita o estoque uma vez só e entra no histórico do Posto Zero', async () => {
+    const key = 'ab'.repeat(32),
+      { data } = await lobby('private', { name: 'Rafa' }),
+      a = await connect(data.key, 'Rafa');
+    a.send({ t: 'auth', key });
+    await a.wait(m => m.t === 'snap');
+    const stub = env.LOBBIES.get(env.LOBBIES.idFromName(data.key));
+    // Espera o hash da chave chegar ao jogador antes de atravessar o portal.
+    await runInDurableObject(stub, async instance => {
+      for (let i = 0; i < 20 && !instance.players.get(a.id).keyHash; i++)
+        await new Promise(r => setTimeout(r, 25));
+      const group = [instance.players.get(a.id)];
+      instance.removePlayer(a.id);
+      await instance.travel('backrooms', group);
+    });
+    const ticket = await a.wait(m => m.t === 'travel');
+    // A equipe vence com sucata na mochila.
+    const room = env.ROOMS.get(env.ROOMS.idFromName(ticket.code));
+    await runInDurableObject(room, async instance => {
+      const r = instance.room,
+        p = r.players[0];
+      p.bag.push({ item: 'scrap', qty: 6 });
+      r.fuses = r.fuses.map(() => true);
+      r.status = 'won';
+      instance.run('sync', { id: p.id, token: p.token });
+      await instance.saving;
+      // Salvar de novo não credita duas vezes.
+      r.expeditionSaved = false;
+      instance.saveResult();
+      await instance.saving;
+    });
+    const inv = await post('/api/inventory/get', { key, name: 'Rafa' });
+    expect(inv.data.items).toEqual({ scrap: 6, almond: 2 });
+    // O Posto Zero do time guardou a expedição.
+    const again = await connect(data.key, 'Rafa');
+    expect(again.status).toBe(101);
+    const info = await runInDurableObject(stub, instance => instance.meta);
+    expect(info.owner).toBe('Rafa');
+    expect(info.base).toEqual({ expeditions: 1, wins: 1, loot: { scrap: 6, almond: 2 } });
+  });
+
+  it('chave inválida não abre estoque', async () => {
+    expect((await post('/api/inventory/get', { key: 'curta', name: 'Rafa' })).status).toBe(401);
+  });
 });
