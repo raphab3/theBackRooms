@@ -22,7 +22,7 @@
       <div id="team"></div>
       <div id="help">
         WASD mover · clique ou espaço atira (segure para carregar) · botão direito ou ← → gira ·
-        Shift correr · F lanterna · V reviver (25 moedas)
+        Shift correr · E desmontar sucata · F lanterna · V reviver (25 moedas)
       </div>
       <label id="settings"
         >Qualidade
@@ -35,9 +35,12 @@
       >
       <div id="notice" role="status"></div>
       <div id="stamina"><div id="staminaFill"></div></div>
+      <div id="bag"></div>
+      <div id="prompt" hidden></div>
       <div id="stick"><div id="knob"></div></div>
       <div id="touchButtons">
         <button id="fire">🔥</button>
+        <button id="use">E</button>
         <button data-key="run">🏃</button>
         <button data-key="light">🔦</button>
         <button data-key="revive">♥</button>
@@ -52,6 +55,7 @@
     <section id="end" class="panel" hidden>
       <h2 id="endTitle"></h2>
       <p id="endSummary"></p>
+      <p id="endLoot"></p>
       <button id="backLobby" class="primary">Voltar ao lobby</button>
     </section>
 

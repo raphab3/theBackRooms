@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { FIRE, traceShot } from '@backrooms/shared/combat.js';
+import { ITEMS, SALVAGE_MS, SALVAGE_REACH, countItem } from '@backrooms/shared/loot.js';
 import { createWorld } from '@backrooms/shared/world.js';
 import { Avatar } from '../lobby/avatar.js';
 import { createHum } from '../lobby/hum.js';
@@ -60,6 +61,9 @@ camera.add(arm);
 const effects = createEffects(scene),
   sfx = createSfx(),
   seenEffects = new Set();
+const ICONS = { scrap: '🔩', almond: '💧', core_fire: '🔥' };
+let myBag = [],
+  salvage = null; // { pile, start } enquanto segura E
 let chargeStart = 0,
   recoil = 0,
   shake = 0,
@@ -189,6 +193,14 @@ function applyRoom(next, first = false) {
       me.y = self.y;
     }
     me.alive = self.alive;
+    // Avisa o que entrou na mochila desde o último estado.
+    if (!first)
+      for (const item of Object.keys(ITEMS)) {
+        const diff = countItem(self.bag || [], item) - countItem(myBag, item);
+        if (diff > 0) notice(`+${diff} ${ITEMS[item].name}`);
+      }
+    myBag = self.bag || [];
+    me.carrying = self.carrying || 0;
   }
   buffer.push(
     performance.now(),
@@ -253,6 +265,17 @@ function renderHud() {
     $('team').append(line);
   }
   $('down').hidden = me.alive || ended;
+  const slots = [];
+  for (let i = 0; i < 12; i++) {
+    const slot = myBag[i];
+    slots.push(
+      `<div class="slot" title="${slot ? ITEMS[slot.item].name : ''}">${slot ? `${ICONS[slot.item]}<b>${slot.qty}</b>` : ''}</div>`,
+    );
+  }
+  if (me.carrying)
+    slots.push(`<div class="carrying">carregando ${me.carrying} mochila(s) de colegas</div>`);
+  const html = slots.join('');
+  if (html !== $('bag').dataset.html) $('bag').innerHTML = $('bag').dataset.html = html;
 }
 
 function finish(won) {
@@ -264,6 +287,15 @@ function finish(won) {
     `Tempo ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} · ` +
     `fusíveis ${room.fuses.filter(Boolean).length}/${room.fuses.length} · ` +
     `quedas ${room.players.filter(p => !p.alive).length} · voltando ao lobby…`;
+  const mine = room.extracted?.[ticket.id] || {},
+    loot = Object.entries(mine)
+      .map(([item, qty]) => `${qty} ${ITEMS[item].name}`)
+      .join(', ');
+  $('endLoot').textContent = won
+    ? loot
+      ? `Você levou: ${loot}.`
+      : 'Você não trouxe nada desta vez.'
+    : 'A mochila ficou para trás.';
   $('end').hidden = false;
   $('down').hidden = true;
   setTimeout(backToLobby, RETURN_MS);
@@ -285,7 +317,10 @@ function startCharge() {
 function releaseShot() {
   if (!chargeStart) return;
   const held = performance.now() - chargeStart,
-    kind = held >= FIRE.charged.chargeMs ? 'charged' : 'primary';
+    wantsCharged = held >= FIRE.charged.chargeMs,
+    // Sem Amêndoa na mochila, o tiro carregado vira um tiro normal.
+    kind = wantsCharged && countItem(myBag, 'almond') ? 'charged' : 'primary';
+  if (wantsCharged && kind === 'primary') notice('Sem Amêndoa para o tiro carregado.');
   chargeStart = 0;
   const now = performance.now();
   if (!room || !me.alive || ended || now - lastShot < FIRE[kind].cooldownMs) return;
@@ -305,15 +340,50 @@ function releaseShot() {
   }
 }
 
+// --- Sucata: segurar E perto de um monte por 2 s ---
+function nearestPile() {
+  let best = null;
+  for (const pile of room?.loot?.piles || []) {
+    const d = Math.hypot(pile.x - me.x, pile.y - me.y);
+    if (d <= SALVAGE_REACH && (!best || d < best.d)) best = { id: pile.id, d };
+  }
+  return best?.id ?? null;
+}
+function startSalvage() {
+  const pile = nearestPile();
+  if (pile === null || salvage || !me.alive || ended) return;
+  salvage = { pile, start: performance.now() };
+  send('salvageStart', { pile });
+}
+function stopSalvage() {
+  salvage = null;
+}
+function stepSalvage(now) {
+  const pile = nearestPile();
+  if (salvage && (pile !== salvage.pile || !me.alive)) salvage = null;
+  if (salvage && now - salvage.start >= SALVAGE_MS) {
+    send('salvage', { pile: salvage.pile });
+    salvage = null;
+  }
+  $('prompt').hidden = pile === null || ended;
+  if (pile !== null) {
+    const progress = salvage ? Math.min(1, (now - salvage.start) / SALVAGE_MS) : 0;
+    $('prompt').innerHTML =
+      `Segure <b>E</b> para desmontar a sucata<div class="bar" style="width:${progress * 100}%"></div>`;
+  }
+}
+
 // --- Entrada: teclado, botão direito/arrastar gira, joystick no celular ---
 addEventListener('keydown', e => {
   if (e.code === 'Space' && !e.repeat) startCharge();
+  if (e.code === 'KeyE' && !e.repeat) startSalvage();
   keys.add(e.code);
   if (e.code === 'KeyF') lantern.visible = !lantern.visible;
   if (e.code === 'KeyV') send('revive');
 });
 addEventListener('keyup', e => {
   if (e.code === 'Space') releaseShot();
+  if (e.code === 'KeyE') stopSalvage();
   keys.delete(e.code);
 });
 addEventListener('blur', () => keys.clear());
@@ -363,6 +433,13 @@ for (const type of ['pointerup', 'pointercancel'])
     stick = { x: 0, y: 0 };
     knob.style.transform = '';
   });
+const useButton = $('use');
+useButton.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  startSalvage();
+});
+useButton.addEventListener('pointerup', stopSalvage);
+useButton.addEventListener('pointercancel', stopSalvage);
 const fireButton = $('fire');
 fireButton.addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -443,6 +520,7 @@ function frame(now) {
     stepSelf(dt, now);
     level.update(room, now / 1000);
     effects.update(dt);
+    stepSalvage(now);
     level.moveEnemy(room.enemy, dt);
     // Zumbido mais forte embaixo das luminárias.
     hum.set(1 - Math.min(1, level.nearestLamp(me.x * S, me.y * S) / 5));

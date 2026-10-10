@@ -1,4 +1,5 @@
 import { ENEMY_HP, ENEMY_RESPAWN_MS, FIRE } from '@backrooms/shared/combat.js';
+import { START_ALMOND, addTotals, createLoot } from '@backrooms/shared/loot.js';
 import { PHASE_ORDER, createWorld, findRoute } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 
@@ -14,6 +15,18 @@ function validatedMode(value = 'normal') {
 const MAX_PLAYERS = 4,
   ACTIVE_MS = 18000,
   TTL = 7200000;
+// Recursos, mochilas e tiros zerados no começo de cada partida (campanha ou não).
+function resetExpedition(room) {
+  room.effects = [];
+  room.loot = createLoot(room.world, room.seed);
+  room.extracted = null;
+  for (const p of room.players)
+    Object.assign(p, {
+      bag: [{ item: 'almond', qty: START_ALMOND }],
+      carrying: [],
+      salvaging: null,
+    });
+}
 function beginPhase(room, now, level = room.level) {
   if (!room.campaignStarted && level === PHASE_ORDER[0]) room.campaignStarted = now;
   room.level = level;
@@ -30,7 +43,7 @@ function beginPhase(room, now, level = room.level) {
   room.fuses = room.world.fuses.map(() => false);
   room.enemy = { ...room.world.enemy };
   room.smile = room.mode === 'hardcore' ? { ...room.world.smile } : null;
-  room.effects = [];
+  resetExpedition(room);
   for (const p of room.players)
     Object.assign(p, {
       x: 1.5,
@@ -59,7 +72,32 @@ function damageEnemy(room, amount, now) {
     enemy.respawnAt = now + ENEMY_RESPAWN_MS;
     enemy.burnUntil = 0;
     enemy.path = [];
+    // Cada entidade derrotada deixa um Núcleo de Fogo onde caiu.
+    room.loot?.cores.push({ id: crypto.randomUUID(), x: enemy.x, y: enemy.y });
   }
+}
+// Pego pela entidade: a mochila (e as que carregava de colegas) fica no chão para ser resgatada.
+function catchPlayer(room, p) {
+  if (!p.alive) return;
+  p.alive = false;
+  const drop = (owner, ownerName, items) =>
+    items.length &&
+    room.loot?.bags.push({ id: crypto.randomUUID(), owner, ownerName, x: p.x, y: p.y, items });
+  drop(p.id, p.name, p.bag || []);
+  for (const bag of p.carrying || []) drop(bag.owner, bag.ownerName, bag.items);
+  p.bag = [];
+  p.carrying = [];
+}
+// Fim da expedição: vitória extrai a mochila de quem está vivo e as resgatadas voltam ao dono.
+function settleExpedition(room) {
+  if (room.extracted || !['won', 'lost'].includes(room.status)) return;
+  const extracted = {};
+  if (room.status === 'won')
+    for (const p of room.players.filter(v => v.alive)) {
+      addTotals((extracted[p.id] ??= {}), p.bag || []);
+      for (const bag of p.carrying || []) addTotals((extracted[bag.owner] ??= {}), bag.items);
+    }
+  room.extracted = extracted;
 }
 function updateEnemyHealth(room, now, dt) {
   const enemy = room.enemy;
@@ -89,6 +127,7 @@ function tickRoom(room, now) {
   }
   // Rooms created before the coin update retain their original map and progress.
   if (!room.world.coins) room.world.coins = createWorld(room.seed, room.level).coins;
+  room.loot ??= createLoot(room.world, room.seed);
   if (!Array.isArray(room.collectedCoins)) room.collectedCoins = [];
   if (!Number.isFinite(room.balance)) room.balance = 0;
   if (!room.coinRespawns) {
@@ -168,9 +207,10 @@ function tickRoom(room, now) {
       else break;
     }
     for (const p of alive)
-      if (now >= (p.protectedUntil || 0) && distance(p, enemy) < 0.43) p.alive = false;
+      if (now >= (p.protectedUntil || 0) && distance(p, enemy) < 0.43) catchPlayer(room, p);
   }
   if (alive.every(p => !p.alive)) room.status = 'lost';
+  settleExpedition(room);
 }
 function safeRoom(room, now) {
   return {
@@ -202,15 +242,30 @@ function safeRoom(room, now) {
       dead: !!room.enemy.dead,
       burning: (room.enemy.burnUntil || 0) > now,
     },
+    loot: room.loot && {
+      piles: room.loot.piles.filter(v => !v.salvaged).map(({ id, x, y }) => ({ id, x, y })),
+      almonds: room.loot.almonds.filter(v => !v.taken).map(({ id, x, y }) => ({ id, x, y })),
+      cores: room.loot.cores,
+      bags: room.loot.bags.map(({ id, owner, ownerName, x, y }) => ({
+        id,
+        owner,
+        ownerName,
+        x,
+        y,
+      })),
+    },
+    extracted: room.extracted || null,
     // Disparos do último segundo, para cada um ver os tiros dos colegas.
     effects: (room.effects || []).filter(e => now - e.at < 1000),
     players: room.players
       .filter(p => now - p.seen < ACTIVE_MS)
-      .map(({ id, name, color, skin, x, y, a, alive, respawns = 0 }) => ({
+      .map(({ id, name, color, skin, x, y, a, alive, respawns = 0, bag = [], carrying = [] }) => ({
         id,
         name,
         color,
         skin,
+        bag,
+        carrying: carrying.length,
         x,
         y,
         a,
@@ -284,7 +339,10 @@ function validateMovement(room, p, body, now, previousSeen) {
 
 export {
   ACTIVE_MS,
+  catchPlayer,
   damageEnemy,
+  resetExpedition,
+  settleExpedition,
   MAX_PLAYERS,
   TTL,
   beginPhase,

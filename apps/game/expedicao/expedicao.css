@@ -87,3 +87,58 @@
   background: #ff6a1a;
   box-shadow: 0 0 10px #ff6a1a;
 }
+
+#bag {
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(12, 34px);
+  gap: 3px;
+}
+#bag .slot {
+  height: 34px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 45%);
+  font-size: 16px;
+  text-align: center;
+  line-height: 32px;
+  position: relative;
+}
+#bag .slot b {
+  position: absolute;
+  right: 2px;
+  bottom: -9px;
+  font-size: 11px;
+}
+#bag .carrying {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  text-align: center;
+  color: var(--accent);
+}
+#prompt {
+  left: 50%;
+  top: 60%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-size: 14px;
+}
+#prompt .bar {
+  height: 4px;
+  margin-top: 4px;
+  background: var(--accent);
+  width: 0;
+}
+@media (pointer: coarse) {
+  #bag {
+    grid-template-columns: repeat(6, 30px);
+    bottom: 210px;
+    left: auto;
+    right: 12px;
+    transform: none;
+  }
+}

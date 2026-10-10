@@ -1,4 +1,11 @@
 import { FIRE, traceShot } from '@backrooms/shared/combat.js';
+import {
+  PICKUP_REACH,
+  SALVAGE_MS,
+  SALVAGE_REACH,
+  addItems,
+  removeItems,
+} from '@backrooms/shared/loot.js';
 import { PHASE_ORDER, createWorld } from '@backrooms/shared/world.js';
 import { ApiError } from './http.js';
 import { authorize, colors, nameOf, newPlayer } from './players.js';
@@ -6,7 +13,10 @@ import {
   ACTIVE_MS,
   MAX_PLAYERS,
   beginPhase,
+  catchPlayer,
   damageEnemy,
+  resetExpedition,
+  settleExpedition,
   distance,
   tickRoom,
   validateMovement,
@@ -25,6 +35,8 @@ const ROOM_ACTIONS = [
   'chat',
   'resume',
   'shoot',
+  'salvageStart',
+  'salvage',
 ];
 
 function join(room, body, now) {
@@ -54,6 +66,9 @@ function playerAction(room, action, body, now) {
       spec = FIRE[kind];
     // Recarga do braço: disparo cedo demais é ignorado sem erro (o cliente só não vê o tiro).
     if (now - (p.shotAt || 0) < spec.cooldownMs) return { hit: false, cooldown: true };
+    // O tiro carregado gasta uma Amêndoa da mochila.
+    if (kind === 'charged' && !removeItems((p.bag ??= []), 'almond', 1))
+      throw new ApiError('Sem Amêndoa para o tiro carregado.', 409);
     p.shotAt = now;
     // O tiro sai da posição que o servidor conhece; do cliente só vem a mira.
     const enemy = room.enemy,
@@ -75,6 +90,26 @@ function playerAction(room, action, body, now) {
       },
     ].slice(-20);
     return { hit: shot.hit };
+  }
+  // Desmontar sucata: começa perto do monte e termina 2 s depois, ainda perto.
+  if (action === 'salvageStart' || action === 'salvage') {
+    if (!p.alive || room.status !== 'playing')
+      throw new ApiError('Agora não dá para desmontar.', 409);
+    const pile = room.loot?.piles.find(v => v.id === body.pile && !v.salvaged);
+    if (!pile || distance(p, pile) > SALVAGE_REACH)
+      throw new ApiError('Chegue mais perto da sucata.');
+    if (action === 'salvageStart') {
+      p.salvaging = { pile: pile.id, at: now };
+      return {};
+    }
+    if (p.salvaging?.pile !== pile.id || now - p.salvaging.at < SALVAGE_MS - 200)
+      throw new ApiError('Segure E até terminar de desmontar.');
+    p.salvaging = null;
+    const got = addItems((p.bag ??= []), 'scrap', pile.amount);
+    if (!got) throw new ApiError('Mochila cheia.', 409);
+    pile.amount -= got;
+    if (!pile.amount) pile.salvaged = true;
+    return { got };
   }
   if (action === 'chat') {
     const text =
@@ -192,6 +227,7 @@ function playerAction(room, action, body, now) {
     room.fuses = room.world.fuses.map(() => false);
     room.enemy = { ...room.world.enemy };
     room.smile = room.mode === 'hardcore' ? { ...room.world.smile } : null;
+    resetExpedition(room);
     for (const v of room.players) {
       v.x = 1.5;
       v.y = 1.5;
@@ -225,13 +261,29 @@ function playerAction(room, action, body, now) {
         }
     for (let i = 0; i < room.world.fuses.length; i++)
       if (distance(p, room.world.fuses[i]) < 0.7) room.fuses[i] = true;
+    // Recursos pegos passando por cima: Amêndoa, Núcleo de Fogo e mochilas de colegas pegos.
+    const loot = room.loot;
+    if (loot && p.alive) {
+      p.bag ??= [];
+      for (const bottle of loot.almonds)
+        if (!bottle.taken && distance(p, bottle) < PICKUP_REACH && addItems(p.bag, 'almond', 1))
+          bottle.taken = true;
+      loot.cores = loot.cores.filter(
+        core => distance(p, core) >= PICKUP_REACH || !addItems(p.bag, 'core_fire', 1),
+      );
+      loot.bags = loot.bags.filter(bag => {
+        if (distance(p, bag) >= PICKUP_REACH) return true;
+        (p.carrying ??= []).push(bag);
+        return false;
+      });
+    }
     if (
       now - room.started > (room.level === 'run' ? 6000 : 22000) &&
       now >= (p.protectedUntil || 0) &&
       ((!room.enemy.dead && distance(p, room.enemy) < 0.43) ||
         (room.mode === 'hardcore' && distance(p, room.smile) < 0.43))
     )
-      p.alive = false;
+      catchPlayer(room, p);
     if (p.alive && room.fuses.every(Boolean) && distance(p, room.world.exit) < 0.7)
       room.status = 'won';
     if (!room.players.some(v => v.alive && now - v.seen < ACTIVE_MS)) room.status = 'lost';
@@ -249,6 +301,7 @@ function stepRoom(room, action, body, now) {
   tickRoom(room, now);
   const extra =
     (action === 'join' ? join(room, body, now) : playerAction(room, action, body, now)) || {};
+  settleExpedition(room);
   if (room.status === 'won') {
     if (!Number.isFinite(room.finished) || room.finished <= room.started) room.finished = now;
   } else room.finished = 0;

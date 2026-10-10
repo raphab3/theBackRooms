@@ -156,8 +156,84 @@ export function buildLevel(scene, world) {
   hpLabel.position.y = 2.5;
   enemy.add(hpLabel);
 
+  // Recursos: montes de sucata, garrafas de Amêndoa, núcleos e mochilas no chão. Criados e
+  // removidos conforme o estado da sala.
+  const lootMeshes = new Map(),
+    scrapMat = new THREE.MeshLambertMaterial({ color: 0x6b5a45 }),
+    metalMat = new THREE.MeshLambertMaterial({ color: 0x8a8f96 }),
+    almondMat = new THREE.MeshBasicMaterial({ color: 0x9fe7ff }),
+    coreMat = new THREE.MeshBasicMaterial({ color: 0xff7a1a }),
+    bagMat = new THREE.MeshLambertMaterial({ color: 0x5a3b22 });
+  function makeLoot(kind, item) {
+    const g = new THREE.Group();
+    if (kind === 'pile') {
+      // Móvel quebrado: caixas e chapas tortas.
+      for (const [w, h, d, x, y, z, r, mat] of [
+        [0.9, 0.5, 0.6, 0, 0.25, 0, 0.2, scrapMat],
+        [0.5, 0.35, 0.5, 0.35, 0.68, 0.1, -0.4, scrapMat],
+        [0.8, 0.05, 0.4, -0.2, 0.55, -0.2, 0.7, metalMat],
+      ]) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+        box.position.set(x, y, z);
+        box.rotation.y = r;
+        g.add(box);
+      }
+    } else if (kind === 'almond') {
+      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.38, 10), almondMat);
+      bottle.position.y = 0.6;
+      g.add(bottle);
+    } else if (kind === 'core') {
+      const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.18), coreMat);
+      core.position.y = 0.7;
+      g.add(
+        core,
+        Object.assign(new THREE.PointLight(0xff7a1a, 3, 3), { position: core.position.clone() }),
+      );
+    } else {
+      const bag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.3), bagMat);
+      bag.position.y = 0.18;
+      g.add(bag);
+      const tag = document.createElement('div');
+      tag.className = 'tag';
+      tag.textContent = `mochila de ${item.ownerName}`;
+      const label = new CSS2DObject(tag);
+      label.position.y = 0.8;
+      g.add(label);
+    }
+    g.position.set(item.x * S, 0, item.y * S);
+    g.userData.kind = kind;
+    scene.add(g);
+    return g;
+  }
+  function syncLoot(loot) {
+    const seen = new Set();
+    for (const [kind, list] of [
+      ['pile', loot.piles],
+      ['almond', loot.almonds],
+      ['core', loot.cores],
+      ['bag', loot.bags],
+    ])
+      for (const item of list) {
+        const key = `${kind}:${item.id}`;
+        seen.add(key);
+        if (!lootMeshes.has(key)) lootMeshes.set(key, makeLoot(kind, item));
+      }
+    for (const [key, g] of lootMeshes)
+      if (!seen.has(key)) {
+        g.traverse(o => o.element?.remove());
+        scene.remove(g);
+        lootMeshes.delete(key);
+      }
+  }
+
   return {
     update(room, t) {
+      if (room.loot) syncLoot(room.loot);
+      for (const g of lootMeshes.values())
+        if (g.userData.kind === 'almond' || g.userData.kind === 'core') {
+          g.rotation.y = t * 1.8;
+          g.position.y = Math.sin(t * 2.5 + g.position.x) * 0.06;
+        }
       room.fuses.forEach((taken, i) => (fuses[i].visible = !taken));
       for (const f of fuses) {
         f.rotation.y = t * 1.5;
