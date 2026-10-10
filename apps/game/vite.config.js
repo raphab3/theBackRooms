@@ -5,8 +5,14 @@ const page = path => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
   build: {
-    // Duas páginas: o jogo clássico (/) e o lobby 3D (/lobby/).
-    rollupOptions: { input: { main: page('index.html'), lobby: page('lobby/index.html') } },
+    // Três páginas: o jogo clássico (/), o lobby 3D (/lobby/) e a expedição 3D (/expedicao/).
+    rollupOptions: {
+      input: {
+        main: page('index.html'),
+        lobby: page('lobby/index.html'),
+        expedicao: page('expedicao/index.html'),
+      },
+    },
     chunkSizeWarningLimit: 700, // three.js sozinho passa de 500 kB sem compressão
   },
   server: {

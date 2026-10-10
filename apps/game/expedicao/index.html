@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Backrooms — Expedição</title>
+    <link rel="stylesheet" href="../lobby/lobby.css" />
+    <link rel="stylesheet" href="./expedicao.css" />
+  </head>
+  <body>
+    <div id="view"></div>
+    <div id="crosshair"></div>
+
+    <section id="hud" hidden>
+      <div id="status">
+        <div id="levelName">NÍVEL 0 · BACKROOMS</div>
+        <div>
+          Fusíveis <b id="fuseCount">0 / 3</b> · Moedas <b id="coins">0</b> ·
+          <span id="clock">00:00</span>
+        </div>
+      </div>
+      <div id="team"></div>
+      <div id="help">
+        WASD mover · botão direito ou ← → gira · Shift correr · F lanterna · V reviver (25 moedas)
+      </div>
+      <div id="notice" role="status"></div>
+      <div id="stamina"><div id="staminaFill"></div></div>
+      <div id="stick"><div id="knob"></div></div>
+      <div id="touchButtons">
+        <button data-key="run">🏃</button>
+        <button data-key="light">🔦</button>
+        <button data-key="revive">♥</button>
+      </div>
+    </section>
+
+    <section id="down" class="panel" hidden>
+      <h2>Você foi pego</h2>
+      <p>Um colega pode reviver a equipe com V (25 moedas).</p>
+    </section>
+
+    <section id="end" class="panel" hidden>
+      <h2 id="endTitle"></h2>
+      <p id="endSummary"></p>
+      <button id="backLobby" class="primary">Voltar ao lobby</button>
+    </section>
+
+    <section id="loading" class="panel">
+      <h2>Entrando no Nível 0…</h2>
+      <p id="loadingError" class="error"></p>
+      <a class="back" href="/lobby/" hidden id="loadingBack">Voltar ao lobby</a>
+    </section>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

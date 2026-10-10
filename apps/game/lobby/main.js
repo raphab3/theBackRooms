@@ -9,6 +9,7 @@ import { PILLARS, PILLAR_RADIUS, buildLobby } from './scene.js';
 const $ = id => document.getElementById(id);
 const NAME_KEY = 'backrooms.explorerName',
   SKIN_KEY = 'backrooms.skin',
+  RETURN_KEY = 'backrooms.lobbyReturn',
   WALK_SPEED = 3.6,
   GRAVITY = 16,
   JUMP_SPEED = 5.2,
@@ -107,16 +108,34 @@ async function join(action) {
     }
     for (const b of document.querySelectorAll('#menu button')) b.disabled = true;
     const lobby = await enterLobby(action, body);
-    lobbyLabel = lobby.code
-      ? `Lobby privado · código <b>${lobby.code}</b>`
-      : `Lobby público · grupo ${lobby.key.split('-')[1]}`;
-    await preloadSkins([skin]);
-    socket = openLobbySocket(lobby.key, name, skin, onMessage, onClose);
+    await connectLobby(lobby.key, label(lobby), name);
   } catch (e) {
     $('menuError').textContent = e.message;
   } finally {
     for (const b of document.querySelectorAll('#menu button')) b.disabled = false;
   }
+}
+const label = lobby =>
+  lobby.code
+    ? `Lobby privado · código <b>${lobby.code}</b>`
+    : `Lobby público · grupo ${lobby.key.split('-')[1]}`;
+async function connectLobby(key, text, name) {
+  await preloadSkins([skin]);
+  lobbyLabel = text;
+  // Guardado para voltar ao mesmo lobby depois da expedição.
+  try {
+    sessionStorage.setItem(RETURN_KEY, JSON.stringify({ key, text, name }));
+  } catch {}
+  socket = openLobbySocket(key, name, skin, onMessage, onClose);
+}
+// Volta da expedição (/lobby/#return): entra direto no mesmo lobby, sem passar pelo menu.
+function returnToLobby() {
+  if (location.hash !== '#return') return;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(RETURN_KEY));
+    if (saved?.key && saved.name) void connectLobby(saved.key, saved.text, saved.name);
+  } catch {}
 }
 $('public').onclick = () => join('public');
 $('private').onclick = () => join('private');
@@ -199,7 +218,7 @@ function travel(m) {
   socket = null;
   const ticket = { code: m.code, id: m.id, token: m.token, name: m.name };
   setTimeout(() => {
-    location.href = '/#travel=' + encodeURIComponent(JSON.stringify(ticket));
+    location.href = '/expedicao/#travel=' + encodeURIComponent(JSON.stringify(ticket));
   }, 600);
 }
 
@@ -459,3 +478,4 @@ function frame(now) {
   labels.render(scene, camera);
 }
 requestAnimationFrame(frame);
+returnToLobby();

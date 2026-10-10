@@ -308,12 +308,13 @@ class LobbyDO {
     if (!group.length) return;
     const now = Date.now(),
       players = [];
-    for (const p of group) players.push(newPlayer(p.name, now, players));
+    for (const p of group) players.push({ ...newPlayer(p.name, now, players), skin: p.skin });
     try {
       const room = await createRoom(this.env, players, {
         level: level || PHASE_ORDER[0],
         mode: 'normal',
-        campaign: true,
+        // Expedição de um nível só: no fim o grupo volta ao lobby, sem avançar de fase sozinho.
+        campaign: false,
         start: true,
       });
       group.forEach((p, i) => {

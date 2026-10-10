@@ -38,7 +38,7 @@ function noise(ctx, size, amount, seed) {
   }
   ctx.putImageData(image, 0, 0);
 }
-const carpet = () =>
+export const carpet = () =>
   canvasTexture(
     256,
     (ctx, s) => {
@@ -55,7 +55,7 @@ const carpet = () =>
     9,
     7,
   );
-const wallpaper = () =>
+export const wallpaper = () =>
   canvasTexture(
     256,
     (ctx, s) => {
@@ -81,7 +81,7 @@ const wallpaper = () =>
     10,
     1.2,
   );
-const ceilingTiles = () =>
+export const ceilingTiles = () =>
   canvasTexture(
     128,
     (ctx, s) => {

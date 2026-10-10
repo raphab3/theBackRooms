@@ -166,10 +166,11 @@ function safeRoom(room, now) {
     enemy: { x: room.enemy.x, y: room.enemy.y, type: 'enemy' },
     players: room.players
       .filter(p => now - p.seen < ACTIVE_MS)
-      .map(({ id, name, color, x, y, a, alive, respawns = 0 }) => ({
+      .map(({ id, name, color, skin, x, y, a, alive, respawns = 0 }) => ({
         id,
         name,
         color,
+        skin,
         x,
         y,
         a,

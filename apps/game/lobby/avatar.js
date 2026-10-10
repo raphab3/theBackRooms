@@ -69,6 +69,9 @@ export class Avatar {
     model.traverse(o => (o.userData.avatar = this));
     this.mixer = new THREE.AnimationMixer(model);
     for (const clip of animations) this.actions[clip.name] = this.mixer.clipAction(clip);
+    // Cair toca uma vez e fica no chão.
+    this.actions.die?.setLoop(THREE.LoopOnce, 1);
+    if (this.actions.die) this.actions.die.clampWhenFinished = true;
     this.play('idle');
   }
 
@@ -99,7 +102,8 @@ export class Avatar {
       this.bubbleEl.hidden = true;
       this.bubbleUntil = 0;
     }
-    if (emote && EMOTE_CLIPS[emote]) this.play(EMOTE_CLIPS[emote]);
+    if (anim === 'down') this.play('die');
+    else if (emote && EMOTE_CLIPS[emote]) this.play(EMOTE_CLIPS[emote]);
     else if (anim === 'run' || speed > 4.2)
       this.play('sprint', Math.max(0.6, speed / SPRINT_CLIP_SPEED));
     else if (speed > 0.2) this.play('walk', Math.max(0.6, speed / WALK_CLIP_SPEED));

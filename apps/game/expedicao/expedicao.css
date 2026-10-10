@@ -1,0 +1,71 @@
+#status {
+  top: 12px;
+  left: 12px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+#levelName {
+  font-family: monospace;
+  letter-spacing: 2px;
+  color: var(--accent);
+}
+#team {
+  top: 76px;
+  left: 12px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+#team .out {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+#stamina {
+  right: 16px;
+  bottom: 16px;
+  width: 160px;
+  height: 6px;
+  background: rgb(255 255 255 / 15%);
+  border-radius: 3px;
+}
+#staminaFill {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 60%);
+  z-index: 4;
+  pointer-events: none;
+}
+#down {
+  top: auto;
+  bottom: 40px;
+  transform: translateX(-50%);
+  text-align: center;
+}
+#down h2,
+#end h2,
+#loading h2 {
+  margin: 0;
+  text-align: center;
+}
+#end p,
+#down p {
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+}
