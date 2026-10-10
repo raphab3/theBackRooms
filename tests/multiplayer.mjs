@@ -201,6 +201,21 @@ async function bundleClient(file = 'main.js', seen = new Set(), out = []) {
   return out;
 }
 const gameSource = (await bundleClient()).join('\n');
+const roomSockets = {};
+async function serve(action, code, body) {
+  const r = await api(
+    new Request('https://game.test/api/rooms/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://game.test' },
+      body: JSON.stringify({ ...body, code }),
+    }),
+    { DB },
+  );
+  return { status: r.status, data: await r.json() };
+}
+function broadcast(code, room) {
+  for (const ws of roomSockets[code] ?? []) ws.deliver({ type: 'room', room });
+}
 function client() {
   let elements = {};
   const sockets = [],
@@ -264,43 +279,49 @@ function client() {
     WebSocket: class {
       constructor(url) {
         this.url = url;
+        this.code = url.split('/')[5];
         this.readyState = 1;
         this.sent = [];
         sockets.push(this);
-        queueMicrotask(() => this.onopen?.());
-      }
-      // Faz o papel do RoomDO: traduz o protocolo WebSocket para a API REST do servidor de teste.
-      send(text) {
-        const msg = JSON.parse(text);
-        this.sent.push(msg);
-        if (msg.t === 'input') return;
-        if (msg.t === 'hello') this.token = msg.token;
-        const action = {
-          start: 'start',
-          revive: 'revive',
-          level: 'admin-level',
-          mode: 'mode',
-          leave: 'leave',
-        }[msg.kind];
-        // O WebSocket entrega em ordem: as respostas do servidor falso também.
-        const me = run('({id:net.id,round:net.room.round})');
+        (roomSockets[this.code] ??= new Set()).add(this);
+        // Como o RoomDO ao aceitar o upgrade: manda a sala inteira para quem acabou de conectar.
         pending.push(
-          (this.chain = (this.chain ?? Promise.resolve()).then(async () => {
-            const data = await call(action ?? 'sync', {
-              code: this.url.split('/')[5],
-              id: me.id,
-              token: this.token,
-              round: me.round,
-              ...(msg.kind === 'level' ? { level: msg.level } : {}),
-              ...(msg.kind === 'mode' ? { mode: msg.mode } : {}),
-            });
-            if (action !== 'leave')
-              this.onmessage?.({ data: JSON.stringify({ t: 'welcome', v: 1, room: data.room }) });
-          })),
+          this.reply(() => serve('sync', this.code, who())).then(r => this.deliverRoom(r)),
+        );
+      }
+      deliver(message) {
+        if (this.readyState === 1) this.onmessage?.({ data: JSON.stringify(message) });
+      }
+      deliverRoom(reply) {
+        if (reply.status === 200) this.deliver({ type: 'room', room: reply.data.room });
+      }
+      // O WebSocket entrega em ordem: as respostas do servidor falso também.
+      reply(task) {
+        return (this.chain = (this.chain ?? Promise.resolve()).then(task));
+      }
+      // Faz o papel do RoomDO: {action, reqId, ...corpo} roda a ação na sala; toda ação exceto `sync`
+      // empurra a sala para todos os conectados e só então responde `result` ao autor.
+      send(text) {
+        const { action, reqId = null, ...body } = JSON.parse(text);
+        this.sent.push({ action, reqId, ...body });
+        pending.push(
+          this.reply(async () => {
+            const reply = await serve(action, this.code, body);
+            if (reply.status !== 200)
+              return this.deliver({
+                type: 'error',
+                reqId,
+                error: reply.data.error,
+                status: reply.status,
+              });
+            if (action !== 'sync') broadcast(this.code, reply.data.room);
+            this.deliver({ type: 'result', reqId, ...reply.data });
+          }),
         );
       }
       close() {
         this.readyState = 3;
+        roomSockets[this.code]?.delete(this);
       }
     },
     matchMedia: () => ({ matches: true }),
@@ -314,7 +335,15 @@ function client() {
       addEventListener() {},
       body: element('body'),
     },
-    fetch: (url, init) => api(new Request('https://game.test' + url, init), { DB }),
+    // Entrar na sala é REST, mas o RoomDO empurra a sala nova para quem já está conectado.
+    fetch: async (url, init) => {
+      const response = await api(new Request('https://game.test' + url, init), { DB });
+      if (url === '/api/rooms/join' && response.ok) {
+        const { room } = await response.clone().json();
+        broadcast(room.code, room);
+      }
+      return response;
+    },
   };
   vm.createContext(sandbox);
   vm.runInContext(worldSource + '\n' + gameSource, sandbox);
@@ -327,9 +356,14 @@ function client() {
       ? result.then(async value => (await Promise.all(pending.splice(0)), value))
       : result;
   }
-  // Equivale a esperar o servidor mandar o estado atual da sala (o `welcome` de uma reconexão).
+  function who() {
+    return run('({id:net.id,token:net.token,round:net.room.round})');
+  }
+  // Equivale a um tick do servidor: a sala atual chega por todos os sockets conectados.
   async function pull() {
-    sockets.at(-1).send(JSON.stringify({ t: 'hello', v: 1, token: run('net.token') }));
+    const ws = sockets.at(-1),
+      reply = await serve('sync', ws.code, who());
+    broadcast(ws.code, reply.data.room);
     await Promise.all(pending.splice(0));
   }
   return { sandbox, elements, sockets, run, pull };
@@ -1195,43 +1229,93 @@ const staleLife = await call(
 assert.equal(staleLife.positionAccepted, false);
 assert.equal(staleLife.movementReason, 'respawn');
 assert.equal(staleLife.room.players[0].x, 1.5);
-// Cliente WebSocket: predição local, correção só acima de 0,5 célula, input a 30 Hz, interpolação e reconexão.
+// Cliente WebSocket: sala empurrada pelo servidor, predição local, correção só acima de 0,5 célula,
+// sync a 30 Hz sem trilhas, interpolação, reconexão e ações que esperam a resposta do servidor.
 const live = client();
 live.run("document.getElementById('nickname').value='Cliente'");
 await live.run("connectRoom('create')");
+assert.equal(live.run('net.joined'), true);
 await live.run('launchRoom()');
 assert.equal(live.run('state'), 'playing');
-const snapshotMessage = (x, y, extra = {}) =>
-  JSON.stringify({
-    t: 'snapshot',
-    tick: 1,
-    players: [{ id: live.run('net.id'), x, y, a: 0, anim: 'idle', alive: true }],
-    enemy: { x: 19.5, y: 19.5 },
-    smile: null,
-    fuses: live.run('net.room.fuses'),
-    coins: { balance: 0, collected: [] },
-    ...extra,
-  });
+// Entrega ao cliente uma sala empurrada pelo servidor, alterada por `change` (código de uma função).
+const pushRoom = (c, change) =>
+  c.run(
+    `handleServerMessage(JSON.stringify({type:'room',room:(${change})({...net.room,players:net.room.players.map(p=>({...p})),revision:net.room.revision+1})}))`,
+  );
+const serverAt = (x, y) =>
+  `room => { room.players[0].x = ${x}; room.players[0].y = ${y}; return room; }`;
 live.run('player.x=1.7;player.y=1.5;recordPrediction()');
 // O servidor ainda vê o jogador onde ele estava 100 ms atrás: não é divergência.
-live.run(`handleServerMessage(${JSON.stringify(snapshotMessage(1.5, 1.5))})`);
+pushRoom(live, `${serverAt(1.5, 1.5)}`);
 assert.equal(live.run('player.x'), 1.7);
 // Servidor muito longe de qualquer posição recente: corrige.
 const far = live.run('net.room.players[0]');
-live.run(`handleServerMessage(${JSON.stringify(snapshotMessage(far.x + 3, far.y))})`);
+pushRoom(live, `${serverAt(far.x + 3, far.y)}`);
 assert.equal(live.run('player.x'), far.x + 3);
 live.run('recordPrediction()');
-// Input a cada tick, em seq crescente; parado ou pausado manda zeros.
+// A 30 Hz o cliente manda a posição em `sync` com seq crescente, sem trilhas; parado, só um batimento por segundo.
 const wsLive = live.sockets.at(-1);
-live.run(
-  "keys={KeyW:true,ShiftLeft:true};stamina=100;update(1/60);sendInput();state='paused';sendInput()",
-);
-const inputs = wsLive.sent.filter(m => m.t === 'input').slice(-2);
-assert.deepEqual([inputs[0].dx, inputs[0].dy, inputs[0].run], [0, 1, true]);
-assert.deepEqual([inputs[1].dx, inputs[1].dy, inputs[1].run], [0, 0, false]);
-assert.ok(inputs[1].seq > inputs[0].seq);
+live.run('player.x=2.5;sendInput()');
+live.run('player.x=2.6;sendInput()');
+const syncs = wsLive.sent.filter(m => m.action === 'sync').slice(-2);
+assert.equal(syncs.length, 2);
+assert.deepEqual([syncs[0].x, syncs[1].x], [2.5, 2.6]);
+assert.ok(syncs[1].seq > syncs[0].seq);
+assert.equal(syncs[0].round, live.run('net.room.round'));
 assert.ok(!JSON.stringify(wsLive.sent).includes('trail'));
-live.run("state='playing';keys={}");
+live.run("state='paused'");
+const beforeBeat = wsLive.sent.length;
+live.run('lastBeat=performance.now();sendInput()');
+assert.equal(wsLive.sent.length, beforeBeat);
+live.run("state='playing'");
+// A ação só conta depois que o servidor aceita: reviver sem moedas na sala (saldo local defasado) é recusado.
+const refused = client();
+refused.run("document.getElementById('nickname').value='SemMoedas'");
+await refused.run("connectRoom('create')");
+await refused.run('launchRoom()');
+modifyRoom(refused.run('net.code'), r => {
+  r.players[0].alive = false;
+  r.status = 'lost';
+});
+await refused.pull();
+assert.equal(refused.run('state'), 'lost');
+refused.run('coinBalance=25');
+await refused.run('reviveAll()');
+assert.equal(refused.run("missionValue('rescues')"), 0);
+assert.equal(refused.run('$("rescueMessage").textContent').includes('Equipe revivida'), false);
+assert.equal(refused.run('state'), 'lost');
+// Transições chegam por empurrão do servidor, sem o cliente perguntar: entrada de jogador, início e fases.
+const hostWs = client(),
+  guestWs = client();
+hostWs.run("document.getElementById('nickname').value='Anfitrião'");
+guestWs.run("document.getElementById('nickname').value='Convidado'");
+await hostWs.run("connectRoom('create')");
+guestWs.run(`document.getElementById('roomCode').value='${hostWs.run('net.code')}'`);
+await guestWs.run("connectRoom('join')");
+assert.equal(hostWs.run('net.room.players.length'), 2, 'broadcast da entrada');
+assert.equal(hostWs.run('remotePlayers.length'), 1);
+assert.equal(hostWs.run('state'), 'lobby');
+await hostWs.run('launchRoom()');
+assert.equal(hostWs.run('state'), 'playing');
+assert.equal(guestWs.run('net.room.status'), 'playing');
+assert.equal(guestWs.run('state'), 'playing', 'lobby→playing chega ao convidado');
+// Fase da campanha: depois da vitória o servidor avança o nível e o convidado recebe round e level novos.
+const phaseBefore = guestWs.run('net.room.round');
+modifyRoom(hostWs.run('net.code'), r => {
+  r.status = 'won';
+  r.finished = Date.now() - 4000;
+});
+await hostWs.pull();
+assert.equal(guestWs.run('net.room.level'), PHASE_ORDER[1]);
+assert.ok(guestWs.run('net.room.round') > phaseBefore);
+assert.equal(guestWs.run('activeLevel'), PHASE_ORDER[1]);
+assert.equal(guestWs.run('state'), 'playing');
+await hostWs.run('leaveRoom()');
+assert.equal(hostWs.run('net'), null);
+await guestWs.pull();
+assert.equal(guestWs.run('net.room.players.length'), 1, 'broadcast da saída');
+assert.equal(guestWs.run('remotePlayers.length'), 0);
+await guestWs.run('leaveRoom()');
 // A predição local não depende da rede: 20 s a 144 Hz batem com o movimento offline.
 const smooth = client();
 smooth.run("document.getElementById('nickname').value='Fluido'");
@@ -1260,24 +1344,27 @@ for (let i = 0; i < 2880; i++) {
 }
 // Queda de conexão: continua na sala, avisa na tela e volta com o mesmo token.
 const token = live.run('net.token');
-wsLive.readyState = 3;
+wsLive.close();
 wsLive.onclose();
 assert.equal(live.run('net.connected'), false);
 assert.notEqual(live.run('net'), null);
 assert.equal(live.run('$("connection").textContent'), 'RECONECTANDO…');
 live.run('openSocket()');
+await Promise.resolve();
 await live.pull();
 assert.equal(live.sockets.length, 2);
-assert.equal(live.sockets.at(-1).sent[0].token, token);
+assert.equal(live.run('net.token'), token);
 assert.equal(live.run('net.connected'), true);
 assert.equal(live.run('reconnectAttempt'), 0);
-// Erro de autenticação do servidor tira o jogador da sala; erro comum só avisa.
-live.run(
-  `handleServerMessage(${JSON.stringify(JSON.stringify({ t: 'error', code: 'rate', message: 'Devagar.' }))})`,
-);
+// Erro de sessão do servidor tira o jogador da sala; erro comum só avisa.
+live.sockets.at(-1).deliver({ type: 'error', reqId: null, error: 'Devagar.', status: 429 });
 assert.notEqual(live.run('net'), null);
+live.sockets.at(-1).deliver({ type: 'error', reqId: null, error: 'Sessão expirada.', status: 401 });
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(live.run('net'), null);
 console.log(
-  'PASS: WebSocket client predicts locally, corrects only past 0.5 cell, sends 30 Hz input without trails, keeps the room across a dropped socket and reconnects with the same token.',
+  'PASS: WebSocket client follows the RoomDO protocol: server pushes drive lobby→playing, joins/leaves and phases, predicts locally, corrects only past 0.5 cell, syncs at 30 Hz without trails and keeps the room across a dropped socket.',
 );
 
 // Missions track actual game events and survive reopening the tab.

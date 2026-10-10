@@ -5,7 +5,7 @@ import { lock, reset } from './engine.js';
 import { enterLandscape } from './fullscreen.js';
 import { LEVEL_INFO } from './levels.js';
 import { selectedMode } from './modes.js';
-import { isAdmin, net, sendAction, showPanel } from './net.js';
+import { applySnapshot, isAdmin, net, roomAction, roomPayload, showPanel } from './net.js';
 import { game } from './state.js';
 
 function setupAdmin() {
@@ -24,7 +24,10 @@ function setupAdmin() {
     $('adminMessage').textContent = '';
     try {
       if (net) {
-        sendAction('level', { level });
+        const session = net;
+        const data = await roomAction('admin-level', { ...roomPayload(), level });
+        if (net !== session) return;
+        applySnapshot(data);
       } else {
         game.soloCampaignElapsed = 0;
         game.soloCompleted = 0;

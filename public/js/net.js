@@ -15,10 +15,12 @@ import { updateRescueUI } from './revive.js';
 import { INPUT_INTERVAL_MS, PredictionHistory, SnapshotBuffer, reconnectDelay } from './netsync.js';
 import { game } from './state.js';
 
-const PROTOCOL_VERSION = 1;
+const REQUEST_TIMEOUT_MS = 8000,
+  HEARTBEAT_MS = 1000;
 
 const history = new PredictionHistory(),
   remoteBuffer = new SnapshotBuffer();
+const pending = new Map();
 let net = null,
   remotePlayers = [],
   netSeq = 0,
@@ -26,7 +28,8 @@ let net = null,
   inputTimer = null,
   reconnectTimer = null,
   reconnectAttempt = 0,
-  clockSkew = 0,
+  lastBeat = 0,
+  requestId = 0,
   sceneRound = -1;
 function showPanel(which) {
   $('adminPanel').hidden = !isAdmin();
@@ -137,28 +140,47 @@ async function connectRoom(action) {
     busyHome(false);
   }
 }
-function sendMessage(msg) {
-  if (socket?.readyState !== 1) return false;
-  socket.send(JSON.stringify(msg));
-  return true;
+// Protocolo do RoomDO: {action, reqId, ...corpo} -> {type:'result'|'error', reqId, ...}; o servidor
+// também empurra {type:'room', room} (sala inteira) a cada mudança e a 20 Hz durante a partida.
+function roomPayload() {
+  return {
+    id: net.id,
+    token: net.token,
+    round: net.room.round,
+    seq: ++netSeq,
+    x: game.player.x,
+    y: game.player.y,
+    a: game.player.a,
+    respawns: net.respawns || 0,
+  };
 }
-function sendAction(kind, extra = {}) {
-  if (!sendMessage({ t: 'action', kind, ...extra }))
-    throw Error('Sem conexão com a sala. Reconectando…');
+function roomAction(action, payload = roomPayload()) {
+  return new Promise((resolve, reject) => {
+    if (socket?.readyState !== 1) return reject(Error('Sem conexão com a sala. Reconectando…'));
+    const reqId = ++requestId,
+      timer = setTimeout(() => {
+        pending.delete(reqId);
+        reject(Error('A conexão demorou demais. Confira a internet e tente novamente.'));
+      }, REQUEST_TIMEOUT_MS);
+    pending.set(reqId, { resolve, reject, timer });
+    socket.send(JSON.stringify({ ...payload, action, reqId }));
+  });
+}
+function failPending(error) {
+  for (const { reject, timer } of pending.values()) {
+    clearTimeout(timer);
+    reject(error);
+  }
+  pending.clear();
 }
 function sendInput() {
   if (!net || socket?.readyState !== 1 || !net.joined) return;
-  const moving = game.state === 'playing' && !net.dead,
-    input = moving && game.input ? game.input : { dx: 0, dy: 0, run: false };
-  sendMessage({
-    t: 'input',
-    seq: ++netSeq,
-    dx: input.dx,
-    dy: input.dy,
-    a: game.player.a,
-    run: input.run,
-    light: game.light,
-  });
+  const now = performance.now(),
+    live = game.state === 'playing' && net.room.status === 'playing' && !net.dead;
+  // Parado, só um batimento por segundo mantém o jogador ativo na sala.
+  if (!live && now - lastBeat < HEARTBEAT_MS) return;
+  lastBeat = now;
+  socket.send(JSON.stringify({ ...roomPayload(), action: 'sync' }));
 }
 function openSocket() {
   clearTimeout(reconnectTimer);
@@ -168,10 +190,6 @@ function openSocket() {
     ws = new WebSocket(scheme + '//' + location.host + '/api/rooms/' + net.code + '/ws');
   socket = ws;
   session.joined = false;
-  ws.onopen = () => {
-    if (net === session && socket === ws)
-      sendMessage({ t: 'hello', v: PROTOCOL_VERSION, token: session.token });
-  };
   ws.onmessage = event => {
     if (net === session && socket === ws) handleServerMessage(event.data);
   };
@@ -187,6 +205,7 @@ function lostConnection() {
   net.connected = false;
   net.joined = false;
   game.keys = {};
+  failPending(Error('Conexão perdida. Tentando reconectar…'));
   const wait = reconnectDelay(reconnectAttempt++);
   $('connection').textContent = 'RECONECTANDO…';
   $('lobbyStatus').textContent = 'Conexão interrompida. Tentando reconectar…';
@@ -197,6 +216,7 @@ function lostConnection() {
 function closeSocket() {
   clearTimeout(reconnectTimer);
   clearInterval(inputTimer);
+  failPending(Error('Você saiu da sala.'));
   const old = socket;
   socket = null;
   reconnectAttempt = 0;
@@ -211,35 +231,24 @@ function handleServerMessage(raw) {
   } catch {
     return;
   }
-  if (msg.t === 'welcome') {
+  if (msg.type === 'room') {
+    // A primeira sala de cada conexão confirma a (re)entrada; é também o estado completo.
     reconnectAttempt = 0;
     net.joined = true;
-    clockSkew = msg.room.now - Date.now();
-    net.room = { ...msg.room, revision: net.room.revision || 0 };
-    applySnapshot({ room: net.room });
+    applySnapshot({ room: msg.room });
     pushRemote(msg.room.players);
-  } else if (msg.t === 'snapshot') {
-    const room = { ...net.room, now: Date.now() + clockSkew };
-    const byId = new Map(msg.players.map(p => [p.id, p]));
-    room.players = room.players.map(p => {
-      const s = byId.get(p.id);
-      return s ? { ...p, x: s.x, y: s.y, a: s.a, alive: s.alive } : p;
-    });
-    room.enemy = msg.enemy;
-    room.smile = msg.smile;
-    room.fuses = msg.fuses;
-    room.balance = msg.coins.balance;
-    room.collectedCoins = msg.coins.collected;
-    applySnapshot({ room });
-    pushRemote(msg.players);
-  } else if (msg.t === 'event' && msg.kind === 'chat') {
-    net.room.messages = [...(net.room.messages || []), msg.message].slice(-50);
-  } else if (msg.t === 'error') {
-    $('lobbyStatus').textContent = msg.message;
-    if (msg.code === 'auth' || msg.code === 'room' || msg.code === 'version') {
-      const message = msg.message;
+  } else if (msg.type === 'result' || msg.type === 'error') {
+    const request = pending.get(msg.reqId);
+    if (request) {
+      pending.delete(msg.reqId);
+      clearTimeout(request.timer);
+      if (msg.type === 'result') request.resolve(msg);
+      else request.reject(Object.assign(Error(msg.error), { status: msg.status }));
+    }
+    if (msg.type === 'error' && (msg.status === 401 || msg.status === 404)) {
+      const message = msg.error;
       void leaveRoom(false).then(() => ($('homeError').textContent = message));
-    } else say(msg.message);
+    } else if (msg.type === 'error' && !request) say(msg.error);
   }
 }
 function pushRemote(players) {
@@ -474,7 +483,11 @@ async function launchRoom() {
   }
   $('launch').disabled = true;
   try {
-    sendAction('start');
+    const session = net,
+      data = await roomAction('start');
+    if (net !== session) return;
+    applySnapshot(data);
+    resumeOnline();
   } catch (e) {
     $('lobbyStatus').textContent = e.message;
   } finally {
@@ -483,7 +496,11 @@ async function launchRoom() {
 }
 async function leaveRoom(send = true) {
   closeChat(false);
-  if (send && net) sendMessage({ t: 'action', kind: 'leave' });
+  if (send && net) {
+    try {
+      await roomAction('leave');
+    } catch {}
+  }
   net = null;
   renderChat();
   closeSocket();
@@ -552,7 +569,8 @@ export {
   remotePlayers,
   requestRoom,
   resumeOnline,
-  sendAction,
+  roomAction,
+  roomPayload,
   setupNet,
   showLobby,
   showPanel,
