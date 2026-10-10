@@ -7,6 +7,7 @@ import { Avatar } from '../lobby/avatar.js';
 import { createHum } from '../lobby/hum.js';
 import { RemoteBuffer } from '../lobby/net.js';
 import { bindQualitySelect, createPipeline } from '../lobby/quality.js';
+import { createStats } from '../lobby/stats.js';
 import { S, buildLevel } from './level.js';
 
 const $ = id => document.getElementById(id);
@@ -43,6 +44,7 @@ camera.add(lantern, lantern.target);
 const pipeline = createPipeline(renderer, scene, camera),
   hum = createHum();
 bindQualitySelect($('quality'), pipeline);
+const stats = createStats(renderer, pipeline);
 function resize() {
   pipeline.resize();
   labels.setSize(innerWidth, innerHeight);
@@ -328,8 +330,11 @@ function stepSelf(dt, now) {
 }
 
 let last = performance.now();
+let frameStart = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
+  const frameMs = now - frameStart;
+  frameStart = now;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (room && world) {
@@ -349,8 +354,10 @@ function frame(now) {
     $('clock').textContent =
       `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   }
+  stats.begin();
   pipeline.render(dt * 1000, now);
   labels.render(scene, camera);
+  stats.end(frameMs, now);
 }
 requestAnimationFrame(frame);
 void start();

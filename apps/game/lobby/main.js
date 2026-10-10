@@ -6,6 +6,7 @@ import { Avatar, preloadSkins } from './avatar.js';
 import { RemoteBuffer, enterLobby, openLobbySocket } from './net.js';
 import { createHum } from './hum.js';
 import { bindQualitySelect, createPipeline } from './quality.js';
+import { createStats } from './stats.js';
 import { PILLARS, PILLAR_RADIUS, animateLobby, buildLobby } from './scene.js';
 
 const $ = id => document.getElementById(id);
@@ -37,6 +38,7 @@ const scene = new THREE.Scene(),
   pipeline = createPipeline(renderer, scene, camera),
   hum = createHum();
 bindQualitySelect($('quality'), pipeline);
+const stats = createStats(renderer, pipeline);
 hum.set(0.5);
 function resize() {
   pipeline.resize();
@@ -448,8 +450,11 @@ if (new URLSearchParams(location.search).has('debug')) window.lobbyDebug = { me,
 
 // --- Laço principal ---
 let last = performance.now();
+let frameStart = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
+  const frameMs = now - frameStart;
+  frameStart = now;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (self) {
@@ -480,8 +485,10 @@ function frame(now) {
   }
   for (const portal of portals) portal.render(Date.now(), me.id);
   animateLobby(now / 1000);
+  stats.begin();
   pipeline.render(dt * 1000, now);
   labels.render(scene, camera);
+  stats.end(frameMs, now);
 }
 requestAnimationFrame(frame);
 returnToLobby();
