@@ -18,7 +18,7 @@ import {
   buildingSeed,
   createCamp,
 } from '@backrooms/shared/camp.js';
-import { FIRE, traceShot } from '@backrooms/shared/combat.js';
+import { FIRE, rayToWall, traceShot } from '@backrooms/shared/combat.js';
 import { ITEMS, SALVAGE_MS, SALVAGE_REACH, countItem } from '@backrooms/shared/loot.js';
 import { createWorld } from '@backrooms/shared/world.js';
 import { Avatar } from '../lobby/avatar.js';
@@ -60,8 +60,10 @@ const scene = new THREE.Scene(),
   camera = new THREE.PerspectiveCamera(70, 1, 0.05, 120);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
-const lantern = new THREE.SpotLight(0xfff4d8, 18, 16, 0.5, 0.45, 1.4);
-lantern.position.set(0.15, -0.15, 0);
+const LANTERN_POWER = 18;
+const lantern = new THREE.SpotLight(0xfff4d8, LANTERN_POWER, 16, 0.5, 0.45, 1.4);
+// Acima e à esquerda do olho: o facho não pega no braço (senão ele estoura de tão claro).
+lantern.position.set(-0.1, 0.12, 0);
 lantern.target.position.set(0, 0, -1);
 camera.add(lantern, lantern.target);
 // Braço-Arma em primeira pessoa: antebraço e o canhão que brilha ao carregar.
@@ -641,6 +643,10 @@ function stepSelf(dt, now) {
     shake = Math.max(0, shake - dt * 1.5);
   }
   // Coice do braço; cor pelo nível (muda no 4, 7 e 10) e brilho/mira crescendo ao carregar.
+  // Lanterna mais fraca colada na parede, para a mancha de luz não estourar a tela.
+  const wall = zoneGrid ? rayToWall(zoneGrid, me.x, me.y, me.a, 3) * S : 6,
+    power = LANTERN_POWER * Math.min(1, Math.max(0.1, (wall + 0.3) / 3) ** 1.4);
+  lantern.intensity += (power - lantern.intensity) * Math.min(1, dt * 10);
   recoil = Math.max(0, recoil - dt * 6);
   arm.position.z = -0.45 + recoil * 0.06;
   const charge = chargeStart ? Math.min(1, (now - chargeStart) / FIRE.charged.chargeMs) : 0;
